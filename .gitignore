@@ -1,0 +1,23 @@
+# Visual Studio
+.vs/
+**/.vs/
+
+# VS Code
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Environment
+.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
