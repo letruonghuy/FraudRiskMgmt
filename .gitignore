@@ -1,6 +1,8 @@
 # Visual Studio
 .vs/
 **/.vs/
+**/bin/
+**/obj/
 
 # VS Code
 .vscode/

@@ -21,4 +21,11 @@ namespace FraudRiskMgmt.API.Models
         public const string FalsePositive = "FalsePositive";
         public const string Closed = "Closed";
     }
+
+    public static class ProposalStatuses
+    {
+        public const string Pending = "Pending";
+        public const string Approved = "Approved";
+        public const string Rejected = "Rejected";
+    }
 }

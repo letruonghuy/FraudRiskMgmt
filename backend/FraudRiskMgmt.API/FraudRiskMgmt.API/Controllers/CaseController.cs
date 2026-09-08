@@ -67,6 +67,7 @@ namespace FraudRiskMgmt.API.Controllers
             var cases = await _appDbContext.Cases
                 .Include( a =>  a.Customer )
                 .Include( a => a.OpenedByUser)
+                .Include(a => a.Alerts)
                 .ToListAsync();
 
             var result = cases.Select( c => new CaseResponse
@@ -153,6 +154,96 @@ namespace FraudRiskMgmt.API.Controllers
             alerts.ForEach(alert => alert.Status = AlertStatuses.UnderReview);
             await _appDbContext.SaveChangesAsync();
             return Ok("Case đang được điều tra");
+        }
+
+        [HttpPost("{id}/notes")]
+        public async Task<IActionResult> AddInvestigationNote(int id, [FromBody] CreateInvestigationNoteRequest request)
+        {
+            var caseItem = await _appDbContext.Cases.FindAsync(id);
+            if (caseItem == null)
+                return NotFound("Case không tồn tại");
+
+            if (caseItem.Status != CaseStatuses.Investigating)
+                return Conflict("Case chưa ở trạng thái đang điều tra");
+
+            var officerExists = await _appDbContext.Users
+                .AnyAsync(user => user.UserId == request.OfficerId && user.Role == "Officer");
+            if (!officerExists)
+                return BadRequest("Officer không tồn tại hoặc không có vai trò phù hợp");
+
+            var note = new InvestigationNote
+            {
+                CaseId = id,
+                AuthorId = request.OfficerId,
+                Content = request.Content.Trim(),
+                CreatedAt = DateTime.UtcNow,
+            };
+
+            _appDbContext.InvestigationNotes.Add(note);
+            await _appDbContext.SaveChangesAsync();
+            return Ok(new { note.InvestigationNoteId, note.CaseId, note.CreatedAt });
+        }
+
+        [HttpPost("{id}/proposals")]
+        public async Task<IActionResult> AddActionProposal(int id, [FromBody] CreateCaseActionProposalRequest request)
+        {
+            var caseItem = await _appDbContext.Cases.FindAsync(id);
+            if (caseItem == null)
+                return NotFound("Case không tồn tại");
+
+            if (caseItem.Status != CaseStatuses.Investigating)
+                return Conflict("Chỉ có thể đề xuất hành động khi Case đang điều tra");
+
+            var allowedActions = new[]
+            {
+                "NoAction", "Monitor", "ContactCustomer", "RestrictTransaction",
+                "BlockAccount", "Escalate", "FalsePositive"
+            };
+            if (!allowedActions.Contains(request.Action, StringComparer.OrdinalIgnoreCase))
+                return BadRequest("Hành động đề xuất không hợp lệ");
+
+            var officerExists = await _appDbContext.Users
+                .AnyAsync(user => user.UserId == request.OfficerId && user.Role == "Officer");
+            if (!officerExists)
+                return BadRequest("Officer không tồn tại hoặc không có vai trò phù hợp");
+
+            var proposal = new CaseActionProposal
+            {
+                CaseId = id,
+                ProposedBy = request.OfficerId,
+                Action = request.Action.Trim(),
+                Reason = request.Reason.Trim(),
+                CreatedAt = DateTime.UtcNow,
+            };
+
+            _appDbContext.CaseActionProposals.Add(proposal);
+            await _appDbContext.SaveChangesAsync();
+            return Ok(new { proposal.CaseActionProposalId, proposal.CaseId, proposal.Action, proposal.Status });
+        }
+
+        [HttpPut("{id}/submit-for-approval")]
+        public async Task<IActionResult> SubmitForApproval(int id)
+        {
+            var caseItem = await _appDbContext.Cases
+                .Include(item => item.ActionProposals)
+                .SingleOrDefaultAsync(item => item.CaseId == id);
+            if (caseItem == null)
+                return NotFound("Case không tồn tại");
+
+            if (caseItem.Status != CaseStatuses.Investigating)
+                return Conflict("Case chưa ở trạng thái đang điều tra");
+
+            if (caseItem.ActionProposals.Count == 0)
+                return BadRequest("Case phải có ít nhất một đề xuất hành động");
+
+            caseItem.Status = CaseStatuses.PendingApproval;
+            var alerts = await _appDbContext.Alerts
+                .Where(alert => alert.CaseId == id)
+                .ToListAsync();
+            alerts.ForEach(alert => alert.Status = AlertStatuses.AwaitingApproval);
+
+            await _appDbContext.SaveChangesAsync();
+            return Ok("Case đã được gửi Manager phê duyệt");
         }
     }
 }

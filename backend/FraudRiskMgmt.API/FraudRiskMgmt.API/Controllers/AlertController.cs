@@ -1,5 +1,4 @@
-﻿using Azure.Core;
-using FraudRiskMgmt.API.Data;
+﻿using FraudRiskMgmt.API.Data;
 using FraudRiskMgmt.API.DTOs;
 using FraudRiskMgmt.API.Models;
 using Microsoft.AspNetCore.Mvc;
@@ -50,8 +49,16 @@ namespace FraudRiskMgmt.API.Controllers
             {
                 return NotFound("Alert không tồn tại");
             }
+
+            var officerExists = await _appDbContext.Users
+                .AnyAsync(user => user.UserId == request.OfficerId && user.Role == "Officer");
+            if (!officerExists)
+            {
+                return BadRequest("Officer không tồn tại hoặc không có vai trò phù hợp");
+            }
+
             alert.AssignedTo = request.OfficerId;
-            alert.Status = "Processing";
+            alert.Status = AlertStatuses.Assigned;
 
             await _appDbContext.SaveChangesAsync();
             return Ok("Assign thành công");
@@ -65,15 +72,21 @@ namespace FraudRiskMgmt.API.Controllers
             {
                 return NotFound("Alert không tồn tại");
             }
+
+            if (alert.CaseId.HasValue)
+            {
+                return Conflict("Alert đã thuộc một Case; hãy xử lý qua Case");
+            }
+
             if (request.Resolution == "FalsePositive")
             {
-                alert.Status = "Closed";
+                alert.Status = AlertStatuses.FalsePositive;
                 await _appDbContext.SaveChangesAsync();
                 return Ok("Alert đã đóng - Cảnh báo giả");
             }
             else if (request.Resolution == "Escalate")
             {
-                alert.Status = "Waiting Approval";
+                alert.Status = AlertStatuses.AwaitingApproval;
                 await _appDbContext.SaveChangesAsync();
                 return Ok("Alert đã xử lý - Chờ Manager duyệt");
 

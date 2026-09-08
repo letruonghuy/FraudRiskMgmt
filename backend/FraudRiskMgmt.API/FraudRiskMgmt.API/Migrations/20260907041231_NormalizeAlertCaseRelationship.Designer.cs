@@ -4,6 +4,7 @@ using FraudRiskMgmt.API.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace FraudRiskMgmt.API.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260907041231_NormalizeAlertCaseRelationship")]
+    partial class NormalizeAlertCaseRelationship
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -65,55 +68,6 @@ namespace FraudRiskMgmt.API.Migrations
                     b.HasIndex("TransactionId");
 
                     b.ToTable("Alerts");
-                });
-
-            modelBuilder.Entity("FraudRiskMgmt.API.Models.CaseActionProposal", b =>
-                {
-                    b.Property<int>("CaseActionProposalId")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("CaseActionProposalId"));
-
-                    b.Property<string>("Action")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<int>("CaseId")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime?>("DecidedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int?>("DecidedBy")
-                        .HasColumnType("int");
-
-                    b.Property<string>("DecisionNote")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<int>("ProposedBy")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Reason")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("CaseActionProposalId");
-
-                    b.HasIndex("CaseId");
-
-                    b.HasIndex("DecidedBy");
-
-                    b.HasIndex("ProposedBy");
-
-                    b.ToTable("CaseActionProposals");
                 });
 
             modelBuilder.Entity("FraudRiskMgmt.API.Models.Cases", b =>
@@ -177,36 +131,6 @@ namespace FraudRiskMgmt.API.Migrations
                     b.HasKey("CustomerId");
 
                     b.ToTable("Customers");
-                });
-
-            modelBuilder.Entity("FraudRiskMgmt.API.Models.InvestigationNote", b =>
-                {
-                    b.Property<int>("InvestigationNoteId")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("InvestigationNoteId"));
-
-                    b.Property<int>("AuthorId")
-                        .HasColumnType("int");
-
-                    b.Property<int>("CaseId")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Content")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("InvestigationNoteId");
-
-                    b.HasIndex("AuthorId");
-
-                    b.HasIndex("CaseId");
-
-                    b.ToTable("InvestigationNotes");
                 });
 
             modelBuilder.Entity("FraudRiskMgmt.API.Models.Transactions", b =>
@@ -311,7 +235,7 @@ namespace FraudRiskMgmt.API.Migrations
                     b.HasOne("FraudRiskMgmt.API.Models.Cases", "Case")
                         .WithMany("Alerts")
                         .HasForeignKey("CaseId")
-                        .OnDelete(DeleteBehavior.NoAction);
+                        .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("FraudRiskMgmt.API.Models.Transactions", "Transaction")
                         .WithMany()
@@ -324,32 +248,6 @@ namespace FraudRiskMgmt.API.Migrations
                     b.Navigation("Case");
 
                     b.Navigation("Transaction");
-                });
-
-            modelBuilder.Entity("FraudRiskMgmt.API.Models.CaseActionProposal", b =>
-                {
-                    b.HasOne("FraudRiskMgmt.API.Models.Cases", "Case")
-                        .WithMany("ActionProposals")
-                        .HasForeignKey("CaseId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("FraudRiskMgmt.API.Models.User", "DecidedByUser")
-                        .WithMany()
-                        .HasForeignKey("DecidedBy")
-                        .OnDelete(DeleteBehavior.NoAction);
-
-                    b.HasOne("FraudRiskMgmt.API.Models.User", "ProposedByUser")
-                        .WithMany()
-                        .HasForeignKey("ProposedBy")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.Navigation("Case");
-
-                    b.Navigation("DecidedByUser");
-
-                    b.Navigation("ProposedByUser");
                 });
 
             modelBuilder.Entity("FraudRiskMgmt.API.Models.Cases", b =>
@@ -371,25 +269,6 @@ namespace FraudRiskMgmt.API.Migrations
                     b.Navigation("OpenedByUser");
                 });
 
-            modelBuilder.Entity("FraudRiskMgmt.API.Models.InvestigationNote", b =>
-                {
-                    b.HasOne("FraudRiskMgmt.API.Models.User", "Author")
-                        .WithMany()
-                        .HasForeignKey("AuthorId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("FraudRiskMgmt.API.Models.Cases", "Case")
-                        .WithMany("InvestigationNotes")
-                        .HasForeignKey("CaseId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Author");
-
-                    b.Navigation("Case");
-                });
-
             modelBuilder.Entity("FraudRiskMgmt.API.Models.Transactions", b =>
                 {
                     b.HasOne("FraudRiskMgmt.API.Models.Customer", "Customer")
@@ -403,11 +282,7 @@ namespace FraudRiskMgmt.API.Migrations
 
             modelBuilder.Entity("FraudRiskMgmt.API.Models.Cases", b =>
                 {
-                    b.Navigation("ActionProposals");
-
                     b.Navigation("Alerts");
-
-                    b.Navigation("InvestigationNotes");
                 });
 #pragma warning restore 612, 618
         }

@@ -17,6 +17,8 @@ namespace FraudRiskMgmt.API.Models
         public DateTime? ClosedAt { get; set; }
         public DateTime? DeletedAt {  get; set; }
         public ICollection<Alert> Alerts { get; set; } = new List<Alert>();
+        public ICollection<InvestigationNote> InvestigationNotes { get; set; } = new List<InvestigationNote>();
+        public ICollection<CaseActionProposal> ActionProposals { get; set; } = new List<CaseActionProposal>();
 
     }
 }
