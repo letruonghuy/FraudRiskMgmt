@@ -1,10 +1,13 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using FraudRiskMgmt.API.Data;
 using FraudRiskMgmt.API.DTOs;
 using Microsoft.EntityFrameworkCore;
+using FraudRiskMgmt.API.Models;
 
 namespace FraudRiskMgmt.API.Controllers
 {
+    [Authorize(Roles = "Manager")]
     [Route("api/[controller]")]
     [ApiController]
     public class DashboardController : ControllerBase
@@ -19,9 +22,9 @@ namespace FraudRiskMgmt.API.Controllers
         public async Task<IActionResult> GetDashboardData()
         {
             var totalTransactions = await _appDbContext.Transactions.CountAsync();
-            var totalNewAlerts = await _appDbContext.Alerts.CountAsync(a => a.Status == "New");
-            var totalCaseInvestigating = await _appDbContext.Cases.CountAsync(c => c.Status == "Investigating");
-            var totalFraudApproved = await _appDbContext.Cases.CountAsync(c => c.Status == "Fraud Approved");
+            var totalNewAlerts = await _appDbContext.Alerts.CountAsync(a => a.Status == AlertStatuses.New);
+            var totalCaseInvestigating = await _appDbContext.Cases.CountAsync(c => c.Status == CaseStatuses.Investigating);
+            var totalFraudApproved = await _appDbContext.Cases.CountAsync(c => c.Status == CaseStatuses.Approved);
             var alertByStatus = await _appDbContext.Alerts
                 .GroupBy(a => a.Status)
                 .Select(g => new AlertStatusCount
