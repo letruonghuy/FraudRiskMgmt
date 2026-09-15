@@ -17,10 +17,19 @@ namespace FraudRiskMgmt.API.Data
         public DbSet<User> Users { get; set; }
         public DbSet<InvestigationNote> InvestigationNotes { get; set; }
         public DbSet<CaseActionProposal> CaseActionProposals { get; set; }
+        public DbSet<AuditLog> AuditLogs { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
+
+            modelBuilder.Entity<User>()
+                .HasIndex(u => u.Email)
+                .IsUnique();
+                
+            modelBuilder.Entity<User>()
+                .Property(user => user.Role)
+                .HasConversion<string>();
 
             modelBuilder.Entity<Alert>()
                 .HasOne(alert => alert.Case)
