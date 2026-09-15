@@ -67,6 +67,47 @@ namespace FraudRiskMgmt.API.Migrations
                     b.ToTable("Alerts");
                 });
 
+            modelBuilder.Entity("FraudRiskMgmt.API.Models.AuditLog", b =>
+                {
+                    b.Property<int>("AuditLogId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("AuditLogId"));
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("EntityId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("EntityType")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("NewStatus")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("OldStatus")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Reason")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("int");
+
+                    b.HasKey("AuditLogId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("AuditLogs");
+                });
+
             modelBuilder.Entity("FraudRiskMgmt.API.Models.CaseActionProposal", b =>
                 {
                     b.Property<int>("CaseActionProposalId")
@@ -283,7 +324,7 @@ namespace FraudRiskMgmt.API.Migrations
 
                     b.Property<string>("Email")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(450)");
 
                     b.Property<string>("FullName")
                         .IsRequired()
@@ -298,6 +339,9 @@ namespace FraudRiskMgmt.API.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.HasKey("UserId");
+
+                    b.HasIndex("Email")
+                        .IsUnique();
 
                     b.ToTable("Users");
                 });
@@ -324,6 +368,17 @@ namespace FraudRiskMgmt.API.Migrations
                     b.Navigation("Case");
 
                     b.Navigation("Transaction");
+                });
+
+            modelBuilder.Entity("FraudRiskMgmt.API.Models.AuditLog", b =>
+                {
+                    b.HasOne("FraudRiskMgmt.API.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("FraudRiskMgmt.API.Models.CaseActionProposal", b =>
@@ -376,7 +431,7 @@ namespace FraudRiskMgmt.API.Migrations
                     b.HasOne("FraudRiskMgmt.API.Models.User", "Author")
                         .WithMany()
                         .HasForeignKey("AuthorId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.NoAction)
                         .IsRequired();
 
                     b.HasOne("FraudRiskMgmt.API.Models.Cases", "Case")

@@ -23,3 +23,7 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+
+
+# Local config - không commit
+**/appsettings.Development.json
