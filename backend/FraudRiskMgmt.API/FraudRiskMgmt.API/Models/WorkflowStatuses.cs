@@ -28,4 +28,13 @@ namespace FraudRiskMgmt.API.Models
         public const string Approved = "Approved";
         public const string Rejected = "Rejected";
     }
+
+    public static class RiskLevels
+    {
+        public const string Critical = "Critical";
+        public const string High = "High";
+        public const string Medium = "Medium";
+        public const string Low = "Low";
+        public const string Safe = "Safe";
+    }
 }
