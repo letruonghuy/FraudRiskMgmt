@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using FraudRiskMgmt.API.DTOs;
+using FraudRiskMgmt.API.Extensions;
 
 namespace FraudRiskMgmt.API.Controllers
 {
@@ -14,12 +15,18 @@ namespace FraudRiskMgmt.API.Controllers
         private readonly AppDbContext _appDbContext;
         private readonly PasswordService _passwordService;
         private readonly JwtService _jwtService;
+        private readonly ILogger<AuthController> _logger;
 
-        public AuthController(AppDbContext appDbContext, PasswordService passwordService, JwtService jwtService)
+        public AuthController(
+            AppDbContext appDbContext,
+            PasswordService passwordService,
+            JwtService jwtService,
+            ILogger<AuthController> logger)
         {
             _appDbContext = appDbContext;
             _passwordService = passwordService;
             _jwtService = jwtService;
+            _logger = logger;
         }
 
         [AllowAnonymous]
@@ -34,28 +41,31 @@ namespace FraudRiskMgmt.API.Controllers
 
                 if (user == null)
                 {
-                    return Unauthorized("Email chưa đăng ký");
+                    _logger.LogWarning("Login thất bại - Email không tồn tại: {Email}", normalizedEmail);
+                    return Unauthorized(ApiResponse<object>.Fail("Email hoặc mật khẩu không đúng"));
                 }
 
                 var isValid = _passwordService.VerifyPassword(user, request.Password, user.PasswordHash);
                 if (!isValid)
                 {
-                    return Unauthorized("Email hoặc mật khẩu không đúng");
+                    _logger.LogWarning("Login thất bại - Sai mật khẩu: {Email}", normalizedEmail);
+                    return Unauthorized(ApiResponse<object>.Fail("Email hoặc mật khẩu không đúng"));
                 }
 
-                return Ok(new LoginResponse
+                _logger.LogInformation("Login thành công: {Email}, Role: {Role}", normalizedEmail, user.Role);
+                return Ok(ApiResponse<LoginResponse>.Ok(new LoginResponse
                 {
                     UserId = user.UserId,
                     FullName = user.FullName,
                     Email = user.Email,
                     Role = user.Role.ToString(),
                     Token = _jwtService.GenerateToken(user)
-                });
+                }));
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error during login: {ex.Message}");
-                return StatusCode(500, "Đã xảy ra lỗi trong quá trình đăng nhập");
+                _logger.LogError(ex, "Lỗi hệ thống khi login: {Email}", request.Email);
+                return StatusCode(500, ApiResponse<object>.Fail("Đã xảy ra lỗi trong quá trình đăng nhập"));
             }
         }
     }
