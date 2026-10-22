@@ -8,6 +8,7 @@
         public string RiskLevel { get; set; } = string.Empty;
         public string Status { get; set; } = string.Empty;  
         public int? AssignedTo {  get; set; }
+        public string? AssignedToName { get; set; }
         public int? CaseId { get; set; }
         public double Amount { get; set; }
         public DateTime CreateAt { get; set; }

@@ -69,7 +69,7 @@ namespace FraudRiskMgmt.API.Controllers
                 );
 
                 await dbTransaction.CommitAsync();
-                return CreatedAtAction(nameof(GetCase), new { id = newCase.CaseId }, new
+                return CreatedAtAction(nameof(GetCaseById), new { id = newCase.CaseId }, new
                 {
                     CaseId = newCase.CaseId,
                     AlertIds = new[] { alert.AlertId },
@@ -152,6 +152,82 @@ namespace FraudRiskMgmt.API.Controllers
             });
         }
 
+        [HttpGet("{id:int}")]
+        [Authorize(Roles = "Officer,Manager")]
+        public async Task<IActionResult> GetCaseById(int id)
+        {
+            var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+            var role = User.FindFirst(ClaimTypes.Role)!.Value;
+
+            var query = _appDbContext.Cases
+                .AsNoTracking()
+                .AsSplitQuery() 
+                .Where(c => c.CaseId == id && c.DeletedAt == null);
+
+            // Officer chỉ xem hồ sơ do mình mở (giống danh sách). Trả 404 thay vì 403
+            // để không lộ việc hồ sơ của người khác có tồn tại hay không.
+            if (role == UserRole.Officer.ToString())
+                query = query.Where(c => c.OpenedBy == userId);
+
+            var result = await query
+                .Select(c => new CaseDetailResponse
+                {
+                    CaseId = c.CaseId,
+                    Status = c.Status,
+                    CustomerId = c.CustomerId,
+                    CustomerName = c.Customer.FullName,
+                    OpenedBy = c.OpenedBy,
+                    OpenByName = c.OpenedByUser.FullName,
+                    CreatedAt = c.CreatedAt,
+                    ClosedAt = c.ClosedAt,
+                    Alerts = c.Alerts
+                    
+                        .OrderBy(a => a.AlertId)
+                        .Select(a => new CaseDetailAlert
+                        {
+                            AlertId = a.AlertId,
+                            Status = a.Status,
+                            RiskScore = a.RiskScore,
+                            RiskLevel = a.RiskLevel,
+                        })
+                        .ToList(),
+                    
+                    Notes = c.InvestigationNotes
+                        .OrderByDescending(n => n.CreatedAt)
+                        .Select(n => new CaseDetailNote
+                        {
+                            InvestigationNoteId = n.InvestigationNoteId,
+                            AuthorId = n.AuthorId,
+                            AuthorName = c.OpenedByUser.FullName,
+                            Content = n.Content,
+                            CreatedAt = n.CreatedAt,
+                        })
+                        .ToList(),
+                    Proposals = c.ActionProposals
+                        .OrderBy(p => p.CreatedAt)
+                        .Select(p => new CaseDetailProposal
+                        {
+                            CaseActionProposalId = p.CaseActionProposalId,
+                            Action = p.Action,
+                            Reason = p.Reason,
+                            Status = p.Status,
+                            ProposedByName = p.ProposedByUser.FullName,
+                            DecisionNote = p.DecisionNote,
+                            DecidedByName = p.DecidedByUser != null ? p.DecidedByUser.FullName : null,
+                            CreatedAt = p.CreatedAt,
+                            DecidedAt = p.DecidedAt,
+                        })
+                        .ToList(),
+                })
+                .SingleOrDefaultAsync();
+
+            if (result == null) return this.ApiNotFound("Case không tồn tại");
+
+            return Ok(result);
+        }
+
+      
+
         [HttpPut("{id}/proposals/{proposalId}/approve")]
         [Authorize(Roles = "Manager")]
         public async Task<IActionResult> ApproveProposal(
@@ -190,14 +266,37 @@ namespace FraudRiskMgmt.API.Controllers
                         item.CaseActionProposalId != proposalId &&
                         item.Status == ProposalStatuses.Pending);
 
+                //if (!hasPendingProposal)
+                //{
+                //    caseItem.Status = CaseStatuses.Approved;
+                //    caseItem.ClosedAt = DateTime.UtcNow;
+                //    var alerts = await _appDbContext.Alerts
+                //        .Where(alert => alert.CaseId == caseItem.CaseId)
+                //        .ToListAsync();
+                //    alerts.ForEach(alert => alert.Status = AlertStatuses.Closed);
+                //}
+
                 if (!hasPendingProposal)
                 {
+                    var approvedActions = await _appDbContext.CaseActionProposals
+                        .Where(item =>
+                            item.CaseId == id &&
+                            item.CaseActionProposalId != proposalId &&
+                            item.Status == ProposalStatuses.Approved)
+                        .Select(item => item.Action)
+                        .ToListAsync();
+                    approvedActions.Add(proposal.Action); // proposal hiện tại chưa SaveChanges nên thêm tay
+
+                    var isFalsePositive = approvedActions.All(action =>
+                        string.Equals(action, "FalsePositive", StringComparison.OrdinalIgnoreCase));
+                    var finalAlertStatus = isFalsePositive ? AlertStatuses.FalsePositive : AlertStatuses.Closed;
+
                     caseItem.Status = CaseStatuses.Approved;
                     caseItem.ClosedAt = DateTime.UtcNow;
                     var alerts = await _appDbContext.Alerts
                         .Where(alert => alert.CaseId == caseItem.CaseId)
                         .ToListAsync();
-                    alerts.ForEach(alert => alert.Status = AlertStatuses.Closed);
+                    alerts.ForEach(alert => alert.Status = finalAlertStatus);
                 }
 
                 await _appDbContext.SaveChangesAsync();
@@ -440,8 +539,8 @@ namespace FraudRiskMgmt.API.Controllers
             if (caseItem.Status != CaseStatuses.Investigating)
                 return this.ApiConflict("Case chưa ở trạng thái đang điều tra");
 
-            if (caseItem.ActionProposals.Count == 0)
-                return this.ApiBadRequest("Case phải có ít nhất một đề xuất hành động");
+            if (!caseItem.ActionProposals.Any(p => p.Status == ProposalStatuses.Pending))
+                return this.ApiBadRequest("Case phải có ít nhất một đề xuất đang chờ duyệt");
 
             using var dbTransaction = await _appDbContext.Database.BeginTransactionAsync();
             try
