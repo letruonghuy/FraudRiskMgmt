@@ -31,17 +31,20 @@
     }
     public class DashboardResponse
     {
+
         public int TotalTransactions { get; set; }
         public int TotalNewAlerts { get; set; }
         public int TotalCaseInvestigating { get; set; }
         //public int TotalFraudApproved { get; set; }
         public int TotalCaseApproved { get; set; }
         public double FalsePositiveRate { get; set; }
+        public double? AvgHandlingMinutes { get; set; }   // null khi chưa có hồ sơ nào đóng trong khoảng đã chọn
         public List<AlertStatusCount> AlertByStatus { get; set; } = new();
         public List<CaseStatusCount> CaseByStatus { get; set; } = new();
         public List<OfficerProductivity> OfficerProductivity { get; set; } = new();
         public List<DailyTransaction> TransactionsByDay { get; set; } = new();
         public List<RiskLevelCount> AlertByRiskLevel { get; set; } = new();
+
 
     }
 }

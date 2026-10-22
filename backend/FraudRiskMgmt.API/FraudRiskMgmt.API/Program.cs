@@ -34,7 +34,10 @@ builder.Services.AddCors(options =>
     options.AddPolicy("AllowReactApp", policy =>
     {
         policy
-            .WithOrigins("http://localhost:5173")  // port mặc định của Vite/ReactJS
+            .WithOrigins(
+                "http://localhost:5173",
+                "http://localhost:5174"
+            )
             .AllowAnyHeader()
             .AllowAnyMethod();
     });
@@ -62,6 +65,10 @@ builder.Services.AddControllers()
             var response = ApiResponse<object>.Fail("Dữ liệu không hợp lệ", errors);
             return new BadRequestObjectResult(response);
         };
+    }).AddJsonOptions(o =>
+    {
+        o.JsonSerializerOptions.Converters.Add(new UtcDateTimeConverter());
+        o.JsonSerializerOptions.Converters.Add(new UtcNullableDateTimeConverter());
     });
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
@@ -140,3 +147,32 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+
+public class UtcDateTimeConverter : System.Text.Json.Serialization.JsonConverter<DateTime>
+{
+    public override DateTime Read(ref System.Text.Json.Utf8JsonReader reader, Type typeToConvert, System.Text.Json.JsonSerializerOptions options)
+        => DateTime.Parse(reader.GetString()!, System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal);
+
+    public override void Write(System.Text.Json.Utf8JsonWriter writer, DateTime value, System.Text.Json.JsonSerializerOptions options)
+        => writer.WriteStringValue(value.Kind == DateTimeKind.Local
+            ? value.ToUniversalTime()
+            : DateTime.SpecifyKind(value, DateTimeKind.Utc));
+}
+
+public class UtcNullableDateTimeConverter : System.Text.Json.Serialization.JsonConverter<DateTime?>
+{
+    public override DateTime? Read(ref System.Text.Json.Utf8JsonReader reader, Type typeToConvert, System.Text.Json.JsonSerializerOptions options)
+        => reader.TokenType == System.Text.Json.JsonTokenType.Null
+            ? null
+            : DateTime.Parse(reader.GetString()!, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal);
+
+    public override void Write(System.Text.Json.Utf8JsonWriter writer, DateTime? value, System.Text.Json.JsonSerializerOptions options)
+    {
+        if (value is null) { writer.WriteNullValue(); return; }
+        writer.WriteStringValue(value.Value.Kind == DateTimeKind.Local
+            ? value.Value.ToUniversalTime()
+            : DateTime.SpecifyKind(value.Value, DateTimeKind.Utc));
+    }
+}
