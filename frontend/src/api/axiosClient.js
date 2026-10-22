@@ -1,4 +1,7 @@
+
+
 import axios from 'axios';
+import { clearStoredAuth } from '../contexts/authUtils';
 
 const axiosClient = axios.create({
   baseURL: import.meta.env.VITE_API_URL || 'https://localhost:44324/api', //'https://localhost:7129/api',
@@ -20,9 +23,17 @@ axiosClient.interceptors.request.use((config) => {
 axiosClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401 && !error.config?.url?.toLowerCase().includes('/auth/login')) {
-      localStorage.clear();
-      window.location.href = '/login';
+    const isLoginRequest = error.config?.url?.toLowerCase().includes('/auth/login');
+
+    // Token hết hạn / không hợp lệ: xóa phiên và về trang đăng nhập,
+    // kèm đường dẫn đang xem để đăng nhập xong quay lại đúng chỗ.
+    if (error.response?.status === 401 && !isLoginRequest) {
+      clearStoredAuth();
+
+      if (window.location.pathname !== '/login') {
+        const from = encodeURIComponent(window.location.pathname + window.location.search);
+        window.location.assign(`/login?reason=expired&from=${from}`);
+      }
     }
 
     return Promise.reject(error);

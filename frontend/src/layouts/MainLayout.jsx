@@ -7,11 +7,12 @@ export default function MainLayout({ children }) {
 
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#main-content">Bỏ qua điều hướng</a>
       <Sidebar role={role} />
 
       <div className="content-shell">
         <Header />
-        <main className="page-content">{children}</main>
+        <main className="page-content" id="main-content">{children}</main>
       </div>
     </div>
   );

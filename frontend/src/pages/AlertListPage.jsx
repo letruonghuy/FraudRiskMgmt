@@ -1,60 +1,36 @@
-import { useEffect, useState } from 'react';
-import { AlertTriangle, ListFilter, RefreshCw } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, ChevronLeft, ChevronRight, ListFilter, RefreshCw, Search } from 'lucide-react';
+import { Link, useSearchParams } from 'react-router-dom';
 import axiosClient from '../api/axiosClient';
+import AlertDrawer from './AlertDrawer';
+import {
+  RISK_CONFIG, STATUS_CONFIG, RiskBadge, RiskGauge, StatusBadge,
+  formatDate, getCreatedAt, getErrorMessage,
+} from './alertShared';
 
-// ── Helpers ──────────────────────────────────────────────
-const RISK_CONFIG = {
-  Critical: { color: '#ef4444', bg: 'rgba(239,68,68,0.12)', border: 'rgba(239,68,68,0.3)' },
-  High:     { color: '#f97316', bg: 'rgba(249,115,22,0.12)', border: 'rgba(249,115,22,0.3)' },
-  Medium:   { color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', border: 'rgba(245,158,11,0.3)' },
-  Low:      { color: '#22c55e', bg: 'rgba(34,197,94,0.12)',  border: 'rgba(34,197,94,0.3)' },
-  Safe:     { color: '#64748b', bg: 'rgba(100,116,139,0.12)', border: 'rgba(100,116,139,0.3)' },
+const PAGE_SIZE = 10;
+
+const SORT_OPTIONS = {
+  newest:    { label: 'Mới nhất',        compare: (a, b) => new Date(getCreatedAt(b)) - new Date(getCreatedAt(a)) },
+  oldest:    { label: 'Cũ nhất',         compare: (a, b) => new Date(getCreatedAt(a)) - new Date(getCreatedAt(b)) },
+  riskDesc:  { label: 'Rủi ro cao → thấp', compare: (a, b) => (Number(b.riskScore) || 0) - (Number(a.riskScore) || 0) },
+  amountDesc:{ label: 'Số tiền lớn → nhỏ', compare: (a, b) => (Number(b.amount) || 0) - (Number(a.amount) || 0) },
 };
 
-const STATUS_CONFIG = {
-  New:              { label: 'Mới',          color: '#3b82f6', bg: 'rgba(59,130,246,0.12)',   border: 'rgba(59,130,246,0.3)' },
-  Assigned:         { label: 'Đã phân công', color: '#a78bfa', bg: 'rgba(167,139,250,0.12)',  border: 'rgba(167,139,250,0.3)' },
-  Processing:       { label: 'Đang xử lý',   color: '#a78bfa', bg: 'rgba(167,139,250,0.12)',  border: 'rgba(167,139,250,0.3)' },
-  UnderReview:      { label: 'Đang xem xét', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)',  border: 'rgba(245,158,11,0.3)' },
-  AwaitingApproval: { label: 'Chờ duyệt',    color: '#fb923c', bg: 'rgba(251,146,60,0.12)',  border: 'rgba(251,146,60,0.3)' },
-  'Waiting Approval': { label: 'Chờ duyệt',  color: '#fb923c', bg: 'rgba(251,146,60,0.12)',  border: 'rgba(251,146,60,0.3)' },
-  Closed:           { label: 'Đã đóng',      color: '#22c55e', bg: 'rgba(34,197,94,0.12)',   border: 'rgba(34,197,94,0.3)' },
-  FalsePositive:    { label: 'Báo động giả', color: '#64748b', bg: 'rgba(100,116,139,0.12)', border: 'rgba(100,116,139,0.3)' },
-  Reopened:         { label: 'Mở lại',       color: '#ef4444', bg: 'rgba(239,68,68,0.12)',   border: 'rgba(239,68,68,0.3)' },
-};
-
-const RiskBadge = ({ level }) => {
-  const cfg = RISK_CONFIG[level] || RISK_CONFIG.Safe;
-  return <span className="badge" style={{ color: cfg.color, backgroundColor: cfg.bg, borderColor: cfg.border }}>{level}</span>;
-};
-
-const StatusBadge = ({ status }) => {
-  const cfg = STATUS_CONFIG[status] || { label: status, color: '#64748b', bg: 'rgba(100,116,139,0.12)', border: 'rgba(100,116,139,0.3)' };
-  return <span className="badge" style={{ color: cfg.color, backgroundColor: cfg.bg, borderColor: cfg.border }}>{cfg.label}</span>;
-};
-
-const RiskGauge = ({ score, level }) => {
-  const numericScore = Number(score) || 0;
-  const pct = Math.max(0, Math.min(100, Math.round(numericScore * 100)));
-  const cfg = RISK_CONFIG[level] || RISK_CONFIG.Safe;
-  return (
-    <div className="risk-gauge">
-      <div className="risk-gauge-bar">
-        <div className="risk-gauge-fill" style={{ width: `${pct}%`, backgroundColor: cfg.color }} />
-      </div>
-      <span className="risk-gauge-label" style={{ color: cfg.color }}>{pct}%</span>
-    </div>
-  );
-};
-
-// ── Main Component ────────────────────────────────────────
 export default function AlertListPage() {
-  const [alerts, setAlerts]         = useState([]);
-  const [loading, setLoading]       = useState(true);
-  const [error, setError]           = useState('');
-  const [statusFilter, setStatus]   = useState('');
-  const [riskFilter, setRisk]       = useState('');
-  const [reloadKey, setReloadKey]   = useState(0);
+  const [alerts, setAlerts]       = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [error, setError]         = useState('');
+  const [statusFilter, setStatus] = useState('');
+  const [riskFilter, setRisk]     = useState('');
+  const [search, setSearch]       = useState('');
+  const [sortKey, setSortKey]     = useState('newest');
+  const [page, setPage]           = useState(1);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  // Alert đang mở trong drawer được lưu trên URL (?selected=3) → F5 hoặc gửi link vẫn mở đúng alert
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedId = searchParams.get('selected');
 
   useEffect(() => {
     let isActive = true;
@@ -64,28 +40,40 @@ export default function AlertListPage() {
         if (!Array.isArray(res.data)) {
           throw new Error('API Alert trả về dữ liệu không đúng định dạng danh sách.');
         }
-
         if (isActive) {
           setAlerts(res.data);
           setError('');
         }
       })
-      .catch((err) => {
-        if (isActive) {
-          setError(err.response?.data?.message || err.message || 'Không thể tải danh sách Alert.');
-        }
-      })
-      .finally(() => {
-        if (isActive) setLoading(false);
-      });
+      .catch((err) => { if (isActive) setError(getErrorMessage(err)); })
+      .finally(() => { if (isActive) setLoading(false); });
 
     return () => { isActive = false; };
   }, [reloadKey]);
 
-  const filteredAlerts = alerts.filter((alert) =>
-    (!statusFilter || alert.status === statusFilter) &&
-    (!riskFilter || alert.riskLevel === riskFilter)
-  );
+  const visibleAlerts = useMemo(() => {
+    const keyword = search.trim().toLowerCase();
+    return alerts
+      .filter((alert) =>
+        (!statusFilter || alert.status === statusFilter) &&
+        (!riskFilter || alert.riskLevel === riskFilter) &&
+        (!keyword ||
+          String(alert.alertId).includes(keyword.replace('#', '')) ||
+          (alert.customerName || '').toLowerCase().includes(keyword))
+      )
+      .sort(SORT_OPTIONS[sortKey].compare);
+  }, [alerts, statusFilter, riskFilter, search, sortKey]);
+
+  const totalPages = Math.max(1, Math.ceil(visibleAlerts.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageAlerts = visibleAlerts.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  const selectedAlert = selectedId ? alerts.find((a) => String(a.alertId) === selectedId) : null;
+
+  const openDrawer = (alertId) => setSearchParams({ selected: String(alertId) });
+  const closeDrawer = useCallback(() => setSearchParams({}), [setSearchParams]);
+
+  const resetPage = (setter) => (event) => { setter(event.target.value); setPage(1); };
 
   const handleRetry = () => {
     setLoading(true);
@@ -93,96 +81,167 @@ export default function AlertListPage() {
     setReloadKey((current) => current + 1);
   };
 
+  const handleRowKeyDown = (event, alertId) => {
+    if (event.target !== event.currentTarget) return; // bỏ qua phím bấm trên link bên trong dòng
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      openDrawer(alertId);
+    }
+  };
+
+  const hasFilter = Boolean(statusFilter || riskFilter || search);
+
   return (
-    <div className="fade-in">
-      {/* ── Page Header ── */}
+    <div className="fade-in alert-list-page">
       <div className="page-header">
         <div>
-          <h2 className="page-title">Alert Monitor</h2>
+          <h1 className="page-title">Giám sát cảnh báo</h1>
           <p className="page-subtitle">Danh sách cảnh báo giao dịch nghi ngờ gian lận</p>
         </div>
-        <div className="header-badge">
-          <AlertTriangle size={15} />
-          {filteredAlerts.length} / {alerts.length} alerts
+        <div className="header-badge" aria-live="polite">
+          <AlertTriangle size={15} aria-hidden="true" />
+          {visibleAlerts.length} / {alerts.length} cảnh báo
         </div>
       </div>
 
-      {/* ── Toolbar ── */}
       <div className="toolbar">
         <div className="toolbar-left">
-          <ListFilter size={16} className="toolbar-icon" />
-          <select className="select-dark" value={statusFilter} onChange={(event) => setStatus(event.target.value)}>
+          <label className="search-box">
+            <Search size={15} aria-hidden="true" />
+            <input
+              type="search"
+              placeholder="Tìm theo mã hoặc tên khách hàng"
+              aria-label="Tìm kiếm cảnh báo"
+              value={search}
+              onChange={resetPage(setSearch)}
+            />
+          </label>
+          <ListFilter size={16} className="toolbar-icon" aria-hidden="true" />
+          <select aria-label="Lọc theo trạng thái" className="select-dark" value={statusFilter} onChange={resetPage(setStatus)}>
             <option value="">Tất cả trạng thái</option>
-            {Object.entries(STATUS_CONFIG).map(([val, { label }]) => (
-              <option key={val} value={val}>{label}</option>
-            ))}
+            {Object.entries(STATUS_CONFIG).map(([val, { label }]) => <option key={val} value={val}>{label}</option>)}
           </select>
-          <select className="select-dark" value={riskFilter} onChange={(event) => setRisk(event.target.value)}>
+          <select aria-label="Lọc theo mức độ rủi ro" className="select-dark" value={riskFilter} onChange={resetPage(setRisk)}>
             <option value="">Tất cả mức độ</option>
-            {Object.keys(RISK_CONFIG).map(level => (
-              <option key={level} value={level}>{level}</option>
-            ))}
+            {Object.entries(RISK_CONFIG).map(([level, { label }]) => <option key={level} value={level}>{label}</option>)}
+          </select>
+          <select aria-label="Sắp xếp" className="select-dark" value={sortKey} onChange={resetPage(setSortKey)}>
+            {Object.entries(SORT_OPTIONS).map(([key, { label }]) => <option key={key} value={key}>{label}</option>)}
           </select>
         </div>
         <div className="toolbar-right">
-          <button className="sort-toggle" onClick={handleRetry} disabled={loading}>
-            <RefreshCw size={15} /> Tải lại
+          <button className="sort-toggle" onClick={handleRetry} disabled={loading} type="button">
+            <RefreshCw size={15} aria-hidden="true" /> Tải lại
           </button>
         </div>
       </div>
 
-      {/* ── Table Card ── */}
-      <div className="page-card">
+      <div className="page-card" aria-busy={loading}>
         {error ? (
-          <div className="empty-state">
-            <AlertTriangle size={42} />
-            <h3>Không tải được danh sách Alert</h3>
+          <div className="empty-state" role="alert">
+            <AlertTriangle size={42} aria-hidden="true" />
+            <h3>Không tải được danh sách cảnh báo</h3>
             <p>{error}</p>
-            <button className="sort-toggle" onClick={handleRetry} type="button">Thử lại</button>
+            <button className="sort-toggle" onClick={handleRetry} type="button">Thử tải lại</button>
           </div>
         ) : loading ? (
-          <div className="table-loading">
-            <div className="spin" style={{ width: 28, height: 28, border: '3px solid rgba(59,130,246,0.2)', borderTopColor: '#3b82f6', borderRadius: '50%' }} />
+          <div className="table-loading" role="status" aria-live="polite">
+            <div className="spin" aria-hidden="true" style={{ width: 28, height: 28, border: '3px solid rgba(59,130,246,0.2)', borderTopColor: '#3b82f6', borderRadius: '50%' }} />
             Đang tải dữ liệu...
           </div>
-        ) : filteredAlerts.length === 0 ? (
+        ) : visibleAlerts.length === 0 ? (
           <div className="empty-state">
-            <AlertTriangle size={48} />
-            <h3>{alerts.length === 0 ? 'Chưa có Alert' : 'Không có Alert phù hợp'}</h3>
-            <p>{alerts.length === 0 ? 'Alert sẽ xuất hiện tại đây khi hệ thống ghi nhận giao dịch rủi ro.' : 'Thử thay đổi bộ lọc trạng thái hoặc mức rủi ro.'}</p>
+            <AlertTriangle size={48} aria-hidden="true" />
+            <h3>{alerts.length === 0 ? 'Chưa có cảnh báo' : 'Không có cảnh báo phù hợp'}</h3>
+            <p>{alerts.length === 0 ? 'Cảnh báo sẽ xuất hiện khi hệ thống ghi nhận giao dịch rủi ro.' : 'Thử thay đổi từ khóa hoặc bộ lọc.'}</p>
+            {hasFilter && (
+              <button className="sort-toggle" type="button" onClick={() => { setSearch(''); setStatus(''); setRisk(''); setPage(1); }}>
+                Xóa bộ lọc
+              </button>
+            )}
           </div>
         ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Khách hàng</th>
-                <th>Số tiền</th>
-                <th>Risk Score</th>
-                <th>Mức độ</th>
-                <th>Trạng thái</th>
-                <th>Officer phụ trách</th>
-                <th>Thời gian</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredAlerts.map((alert) => (
-                <tr key={alert.alertId}>
-                  <td><span className="cell-id">#{alert.alertId}</span></td>
-                  <td><span className="cell-name">{alert.customerName}</span></td>
-                  <td><span className="cell-amount">{alert.amount?.toLocaleString('vi-VN')} ₫</span></td>
-                  <td><RiskGauge score={alert.riskScore} level={alert.riskLevel} /></td>
-                  <td><RiskBadge level={alert.riskLevel} /></td>
-                  <td><StatusBadge status={alert.status} /></td>
-                  <td>{alert.assignedToName || <span className="cell-time">Chưa phân công</span>}</td>
-                  <td><span className="cell-time">{new Date(alert.createAt).toLocaleString('vi-VN')}</span></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <>
+            <div className="alert-table-scroll" role="region" aria-label="Bảng danh sách cảnh báo" tabIndex={0}>
+              <table className="data-table" aria-label="Danh sách cảnh báo giao dịch">
+                <thead>
+                  <tr>
+                    <th scope="col">Mã</th>
+                    <th scope="col">Khách hàng</th>
+                    <th scope="col">Số tiền</th>
+                    <th scope="col">Điểm rủi ro</th>
+                    <th scope="col">Mức độ</th>
+                    <th scope="col">Trạng thái</th>
+                    <th scope="col">Người phụ trách</th>
+                    <th scope="col">Thời gian</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pageAlerts.map((alert) => (
+                    <tr
+                      key={alert.alertId}
+                      className={`clickable-row ${String(alert.alertId) === selectedId ? 'selected' : ''}`}
+                      tabIndex={0}
+                      onClick={() => openDrawer(alert.alertId)}
+                      onKeyDown={(event) => handleRowKeyDown(event, alert.alertId)}
+                      aria-label={`Xem nhanh cảnh báo ${alert.alertId}`}
+                    >
+                      <td>
+                        <Link
+                          className="cell-id alert-detail-link"
+                          to={`/alerts/${alert.alertId}`}
+                          onClick={(event) => event.stopPropagation()}
+                          aria-label={`Mở trang chi tiết cảnh báo ${alert.alertId}`}
+                        >
+                          #{alert.alertId}
+                        </Link>
+                      </td>
+                      <td><span className="cell-name">{alert.customerName}</span></td>
+                      <td><span className="cell-amount">{alert.amount?.toLocaleString('vi-VN')} ₫</span></td>
+                      <td><RiskGauge score={alert.riskScore} level={alert.riskLevel} /></td>
+                      <td><RiskBadge level={alert.riskLevel} /></td>
+                      <td><StatusBadge status={alert.status} /></td>
+                      <td>{alert.assignedToName || <span className="cell-time">Chưa phân công</span>}</td>
+                      <td><span className="cell-time">{formatDate(getCreatedAt(alert))}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {totalPages > 1 && (
+              <nav className="pagination" aria-label="Phân trang">
+                <span className="page-info">
+                  Trang {currentPage} / {totalPages} · {visibleAlerts.length} cảnh báo
+                </span>
+                <div className="page-controls">
+                  <button
+                    type="button"
+                    className="page-btn"
+                    onClick={() => setPage(currentPage - 1)}
+                    disabled={currentPage <= 1}
+                    aria-label="Trang trước"
+                  >
+                    <ChevronLeft size={16} aria-hidden="true" />
+                  </button>
+                  <span className="page-current" aria-current="page">{currentPage}</span>
+                  <button
+                    type="button"
+                    className="page-btn"
+                    onClick={() => setPage(currentPage + 1)}
+                    disabled={currentPage >= totalPages}
+                    aria-label="Trang sau"
+                  >
+                    <ChevronRight size={16} aria-hidden="true" />
+                  </button>
+                </div>
+              </nav>
+            )}
+          </>
         )}
       </div>
 
+      {selectedAlert && <AlertDrawer alert={selectedAlert} onClose={closeDrawer} />}
     </div>
   );
 }

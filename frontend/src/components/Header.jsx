@@ -1,24 +1,147 @@
+// import { useState, useRef, useEffect } from 'react';
+// import { LogOut, UserCircle2, ChevronDown } from 'lucide-react';
+// import { useLocation, useNavigate } from 'react-router-dom';
+// import { useAuth } from '../contexts/AuthContext';
+
+// const ROLE_LABELS = {
+//   Officer: 'Điều tra viên',
+//   Manager: 'Quản lý',
+// };
+
+// const PAGE_CONTEXT = {
+//   '/alerts': 'Vận hành cảnh báo',
+//   '/cases': 'Quy trình điều tra',
+//   '/dashboard': 'Tổng quan hệ thống',
+// };
+
+// export default function Header() {
+//   const { user, logout } = useAuth();
+//   const navigate = useNavigate();
+//   const { pathname } = useLocation();
+//   const [open, setOpen] = useState(false);
+//   const ref = useRef(null);
+//   const triggerRef = useRef(null);
+
+//   useEffect(() => {
+//     const handlePointerDown = (event) => {
+//       if (ref.current && !ref.current.contains(event.target)) {
+//         setOpen(false);
+//       }
+//     };
+
+//     const handleKeyDown = (event) => {
+//       if (event.key === 'Escape' && open) {
+//         setOpen(false);
+//         triggerRef.current?.focus();
+//       }
+//     };
+
+//     document.addEventListener('pointerdown', handlePointerDown);
+//     document.addEventListener('keydown', handleKeyDown);
+//     return () => {
+//       document.removeEventListener('pointerdown', handlePointerDown);
+//       document.removeEventListener('keydown', handleKeyDown);
+//     };
+//   }, [open]);
+
+//   const handleLogout = () => {
+//     logout();
+//     navigate('/login', { replace: true });
+//   };
+
+//   return (
+//     <header className="topbar">
+//       <p className="topbar-context">{PAGE_CONTEXT[pathname] || (pathname.startsWith('/alerts/') ? PAGE_CONTEXT['/alerts'] : 'Hệ thống nội bộ')}</p>
+//       <div className="topbar-actions">
+//         <div className="user-menu-container" ref={ref}>
+//           <button
+//             ref={triggerRef}
+//             type="button"
+//             onClick={() => setOpen(o => !o)}
+//             className="user-menu-trigger"
+//             aria-expanded={open}
+//             aria-controls="user-menu-options"
+//           >
+//             <UserCircle2 size={18} aria-hidden="true" />
+//             <div className="user-menu-identity">
+//               <strong>
+//                 {user?.fullName || 'Người dùng'}
+//               </strong>
+//               <span>
+//                 {ROLE_LABELS[user?.role] || 'Người dùng'}
+//               </span>
+//             </div>
+//             <ChevronDown
+//               size={15}
+//               className={`user-menu-chevron ${open ? 'open' : ''}`}
+//               aria-hidden="true"
+//             />
+//           </button>
+
+//           <div className="user-menu-popup" id="user-menu-options" hidden={!open}>
+//               <button
+//                 type="button"
+//                 onClick={handleLogout}
+//                 className="logout-button"
+//               >
+//                 <LogOut size={16} aria-hidden="true" />
+//                 Đăng xuất
+//               </button>
+//           </div>
+//         </div>
+//       </div>
+//     </header>
+//   );
+// }
+
 import { useState, useRef, useEffect } from 'react';
 import { LogOut, UserCircle2, ChevronDown } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+
+const ROLE_LABELS = {
+  Officer: 'Điều tra viên',
+  Manager: 'Quản lý',
+};
+
+const PAGE_CONTEXT = {
+  '/alerts': 'Vận hành cảnh báo',
+  '/cases': 'Quy trình điều tra',
+  '/dashboard': 'Tổng quan hệ thống',
+};
+
+// Lấy tiêu đề theo đoạn đầu của đường dẫn: /alerts/5 → /alerts, /cases/3 → /cases
+const getPageContext = (pathname) => PAGE_CONTEXT[`/${pathname.split('/')[1]}`] || 'Hệ thống nội bộ';
 
 export default function Header() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
+  const triggerRef = useRef(null);
 
-  // Click ngoài dropdown thì đóng
   useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) {
+    const handlePointerDown = (event) => {
+      if (ref.current && !ref.current.contains(event.target)) {
         setOpen(false);
       }
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape' && open) {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [open]);
 
   const handleLogout = () => {
     logout();
@@ -27,85 +150,43 @@ export default function Header() {
 
   return (
     <header className="topbar">
-      <div>
-        {/* <p className="eyebrow">Fraud Risk Management</p>
-        <h1>Monitoring Center</h1> */}
-        <h2>Welcome back, {user?.fullName || 'User'}!👋</h2>
-      </div>
-
+      <p className="topbar-context">{getPageContext(pathname)}</p>
       <div className="topbar-actions">
-        {/* User dropdown */}
-        <div ref={ref} style={{ position: 'relative' }}>
+        <div className="user-menu-container" ref={ref}>
           <button
+            ref={triggerRef}
             type="button"
             onClick={() => setOpen(o => !o)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px',
-              padding: '10px 14px',
-              borderRadius: '12px',
-              background: 'rgba(15,23,42,0.9)',
-              border: '1px solid rgba(148,163,184,0.18)',
-              color: 'var(--text)',
-              cursor: 'pointer',
-              transition: 'border-color 0.2s',
-            }}
+            className="user-menu-trigger"
+            aria-expanded={open}
+            aria-controls="user-menu-options"
           >
-            <UserCircle2 size={18} color="var(--text-soft)" />
-            <div style={{ textAlign: 'left' }}>
-              <strong style={{ display: 'block', fontSize: '0.875rem' }}>
-                {user?.fullName || 'User'}
+            <UserCircle2 size={18} aria-hidden="true" />
+            <div className="user-menu-identity">
+              <strong>
+                {user?.fullName || 'Người dùng'}
               </strong>
-              <span style={{ display: 'block', color: 'var(--text-soft)', fontSize: '0.72rem' }}>
-                {user?.role || 'Unknown role'}
+              <span>
+                {ROLE_LABELS[user?.role] || 'Người dùng'}
               </span>
             </div>
             <ChevronDown
               size={15}
-              color="var(--text-soft)"
-              style={{ transition: 'transform 0.2s', transform: open ? 'rotate(180deg)' : 'rotate(0deg)' }}
+              className={`user-menu-chevron ${open ? 'open' : ''}`}
+              aria-hidden="true"
             />
           </button>
 
-          {/* Dropdown menu */}
-          {open && (
-            <div style={{
-              position: 'absolute',
-              top: 'calc(100% + 8px)',
-              right: 0,
-              minWidth: '180px',
-              background: 'var(--panel-strong)',
-              border: '1px solid rgba(148,163,184,0.18)',
-              borderRadius: '12px',
-              boxShadow: 'var(--shadow)',
-              overflow: 'hidden',
-              zIndex: 100,
-            }}>
+          <div className="user-menu-popup" id="user-menu-options" hidden={!open}>
               <button
                 type="button"
                 onClick={handleLogout}
-                style={{
-                  width: '100%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                  padding: '12px 16px',
-                  background: 'none',
-                  border: 'none',
-                  color: '#fca5a5',
-                  fontSize: '0.875rem',
-                  cursor: 'pointer',
-                  transition: 'background 0.15s',
-                }}
-                onMouseEnter={e => e.currentTarget.style.background = 'rgba(239,68,68,0.08)'}
-                onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                className="logout-button"
               >
-                <LogOut size={15} />
+                <LogOut size={16} aria-hidden="true" />
                 Đăng xuất
               </button>
-            </div>
-          )}
+          </div>
         </div>
       </div>
     </header>

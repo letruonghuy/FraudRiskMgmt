@@ -1,14 +1,15 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, ListFilter, ShieldAlert, BriefcaseBusiness } from 'lucide-react';
+import { LayoutDashboard, ListFilter, BriefcaseBusiness } from 'lucide-react';
+import logoImg from '../assets/logo.png';
 
 const getNavItems = (role) => {
   const items = [
-    { label: 'Alerts', to: '/alerts', icon: ListFilter, allowed: ['Officer', 'Manager'] },
-    { label: 'Cases', to: '/cases', icon: BriefcaseBusiness, allowed: ['Officer', 'Manager'] },
+    { label: 'Cảnh báo', to: '/alerts', icon: ListFilter },
+    { label: 'Hồ sơ điều tra', to: '/cases', icon: BriefcaseBusiness },
   ];
 
   if (role === 'Manager') {
-    items.unshift({ label: 'Dashboard', to: '/dashboard', icon: LayoutDashboard, allowed: ['Manager'] });
+    items.unshift({ label: 'Tổng quan', to: '/dashboard', icon: LayoutDashboard });
   }
 
   return items;
@@ -18,38 +19,27 @@ export default function Sidebar({ role }) {
   const navItems = getNavItems(role);
 
   return (
-    <aside className="sidebar">
+    <aside className="sidebar" aria-label="Điều hướng chính">
       <div className="brand-box">
-        <div className="brand-mark">FR</div>
+        <img className="brand-mark" src={logoImg} alt="" />
         <div>
-          <p className="brand-name">FraudRisk</p>
-          <span className="brand-subtitle">Management</span>
+          <p className="brand-name">FraudRiskMgmt</p>
+          <span className="brand-subtitle">Quản lý rủi ro</span>
         </div>
       </div>
 
-      <nav className="nav-menu">
+      <nav className="nav-menu" aria-label="Chính">
         {navItems.map(({ label, to, icon: Icon }) => (
           <NavLink
             key={to}
             to={to}
             className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
           >
-            <Icon size={18} />
+            <Icon size={18} aria-hidden="true" />
             <span>{label}</span>
           </NavLink>
         ))}
       </nav>
-
-      <div className="sidebar-footer">
-        <div className="mini-card">
-          <ShieldAlert size={16} />
-          <span>Risk Workflow</span>
-        </div>
-        <div className="mini-card soft">
-          <BriefcaseBusiness size={16} />
-          <span>{role || 'User'}</span>
-        </div>
-      </div>
     </aside>
   );
 }
