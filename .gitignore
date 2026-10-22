@@ -34,6 +34,15 @@ pnpm-debug.log*
 .DS_Store
 Thumbs.db
 
-
 # Local config - không commit
 **/appsettings.Development.json
+
+# AI skills - không đưa vào bản nộp
+.claude/
+.github/prompts/
+
+# AI skills - không đưa vào bản nộp
+.claude/
+.github/agents/
+.github/skills/
+.impeccable/
