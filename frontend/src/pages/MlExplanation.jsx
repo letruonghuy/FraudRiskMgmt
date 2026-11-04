@@ -1,6 +1,6 @@
 import { Cpu } from 'lucide-react';
 import { FEATURE_META, ML_MODEL_INFO, computeFeatures } from './mlExplain';
-import { formatCurrency, toRiskPercent } from './alertShared';
+import { RISK_CONFIG, formatCurrency, toRiskPercent } from './alertShared';
 
 const MONEY_KEYS = new Set(['errorBalanceOrig', 'errorBalanceDest', 'oldbalanceOrg', 'newbalanceOrig', 'oldbalanceDest', 'newbalanceDest', 'amount']);
 
@@ -14,9 +14,13 @@ function formatFeature(key, value) {
 
 export default function MlExplanation({ alert }) {
   const features = computeFeatures(alert);
-  const scorePct = toRiskPercent(alert.riskScore);
-  const thresholdPct = Math.round(ML_MODEL_INFO.threshold * 100);
-  const overThreshold = scorePct >= thresholdPct;
+  const score = Number(alert.riskScore) || 0;
+  const scorePct = toRiskPercent(score);
+  const scoreLabel = (score * 100).toLocaleString('vi-VN', { maximumFractionDigits: 1 });
+  const fraudPct = Math.round(ML_MODEL_INFO.threshold * 100);
+  const alertPct = Math.round(ML_MODEL_INFO.alertThreshold * 100);
+  const levelLabel = RISK_CONFIG[alert.riskLevel]?.label;
+  const overFraudThreshold = score >= ML_MODEL_INFO.threshold;
   const maxImportance = Math.max(...FEATURE_META.map((f) => f.importance));
   const rows = [...FEATURE_META].sort((a, b) => b.importance - a.importance);
 
@@ -31,13 +35,27 @@ export default function MlExplanation({ alert }) {
       </div>
 
       <p className="ml-verdict">
-        Điểm rủi ro <strong>{scorePct}%</strong> {overThreshold ? 'vượt' : 'chưa đạt'} ngưỡng cảnh báo{' '}
-        <strong>{thresholdPct}%</strong> của mô hình.
+        {overFraudThreshold ? (
+          <>
+           Điểm rủi ro <strong>{scoreLabel}%</strong> vượt ngưỡng <strong>{fraudPct}%</strong>: mô hình xác định đây là giao dịch
+            có khả năng gian lận cao{levelLabel ? ` (mức ${levelLabel})` : ''}.
+          </>
+        ) : (
+          <>
+            Điểm rủi ro <strong>{scoreLabel}%</strong> chưa tới ngưỡng <strong>{fraudPct}%</strong> mà mô hình dùng để kết luận gian lận,
+            nhưng đã vượt ngưỡng tạo cảnh báo <strong>{alertPct}%</strong>. Hệ thống tạo cảnh báo{levelLabel ? ` mức ${levelLabel}` : ''} để
+            điều tra viên xem xét, không tự kết luận.
+          </>
+        )}
       </p>
       <div className="ml-threshold" aria-hidden="true">
         <span className="ml-threshold-fill" style={{ width: `${scorePct}%` }} />
-        <span className="ml-threshold-mark" style={{ left: `${thresholdPct}%` }} />
+        <span className="ml-threshold-mark" style={{ left: `${alertPct}%`, opacity: 0.55 }} />
+        <span className="ml-threshold-mark" style={{ left: `${fraudPct}%` }} />
       </div>
+      <p className="case-empty ml-note">
+        Vạch mờ {alertPct}%: ngưỡng tạo cảnh báo. Vạch đậm {fraudPct}%: ngưỡng mô hình xác định gian lận.
+      </p>
 
       <div className="detail-table-scroll" role="region" aria-label="Đặc trưng đầu vào của mô hình" tabIndex={0}>
         <table className="detail-balance-table ml-table">
@@ -67,7 +85,7 @@ export default function MlExplanation({ alert }) {
         </table>
       </div>
 
-      <p className="case-empty">
+      <p className="case-empty ml-note">
         “Mức ảnh hưởng chung” là độ quan trọng của đặc trưng đối với toàn bộ mô hình, không phải phần đóng góp riêng cho cảnh báo này.
         Mô hình được huấn luyện trên {ML_MODEL_INFO.trainedOn}.
       </p>

@@ -110,10 +110,6 @@ export default function LoginPage() {
           align-items: center;
           justify-content: center;
           background-color: var(--bg);
-          background-image:
-            linear-gradient(rgba(148, 163, 184, 0.025) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(148, 163, 184, 0.025) 1px, transparent 1px);
-          background-size: 32px 32px;
           padding: 32px 20px;
         }
 

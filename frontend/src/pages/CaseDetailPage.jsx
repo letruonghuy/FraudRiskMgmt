@@ -4,10 +4,8 @@ import { Link, useParams } from 'react-router-dom';
 import axiosClient from '../api/axiosClient';
 import { useAuth } from '../contexts/AuthContext';
 import { RiskBadge, RiskGauge, StatusBadge, formatDate, getErrorMessage } from './alertShared';
-import {
-  CASE_STATUS_CONFIG, CASE_STATUS_HINT, CaseStepper,
-  PROPOSAL_ACTIONS, ProposalStatusBadge, getActionLabel,
-} from './caseShared';
+import { CASE_STATUS_CONFIG, CASE_STATUS_HINT, PROPOSAL_ACTIONS, getActionLabel } from './caseUtils';
+import { CaseStepper, ProposalStatusBadge } from './caseShared';
 
 const extractMessage = (response, fallback) => {
   if (typeof response?.data === 'string' && response.data) return response.data;
@@ -126,6 +124,23 @@ function CaseDetailContent({ id }) {
   // Gửi duyệt cần ít nhất một đề xuất ĐANG CHỜ (đề xuất đã bị từ chối không còn tính),
   // nếu không hồ sơ sẽ kẹt ở "Chờ duyệt" vì Manager không còn gì để quyết định.
   const pendingCount = proposals.filter((p) => p.status === 'Pending').length;
+  const approvedCount = proposals.filter((p) => p.status === 'Approved').length;
+  const rejectedCount = proposals.filter((p) => p.status === 'Rejected').length;
+  const isFinished = status === 'Approved' || status === 'Closed' || status === 'FalsePositive';
+
+  // Nhãn phần đề xuất phản ánh đúng thực tế, không cố định "Chờ Manager quyết định"
+  let proposalsEyebrow = 'Đề xuất của điều tra viên';
+    if (proposals.length > 0) {
+      if (pendingCount > 0) {
+        proposalsEyebrow = status === 'PendingApproval'
+          ? `Chờ Manager quyết định (${pendingCount})`
+          : 'Chưa gửi Manager quyết định';
+      } else if (isFinished) {
+        proposalsEyebrow = `Đã quyết định xong · ${approvedCount} duyệt, ${rejectedCount} từ chối`;
+      } else if (rejectedCount > 0) {
+        proposalsEyebrow = `Cần đề xuất mới · ${rejectedCount} đề xuất bị từ chối`;
+      }
+    }
 
   const isOwner = role === 'Officer' && user?.userId != null && String(caseData.openedBy) === String(user.userId);
   const isManager = role === 'Manager';
@@ -240,7 +255,7 @@ function CaseDetailContent({ id }) {
           <section className="detail-section" aria-labelledby="case-proposals-heading">
             <div className="detail-section-heading">
               <div>
-                <p className="detail-eyebrow">Chờ Manager quyết định</p>
+                <p className="detail-eyebrow">{proposalsEyebrow}</p>
                 <h2 id="case-proposals-heading">Đề xuất hành động</h2>
               </div>
               <span className="detail-type-tag">{proposals.length}</span>
@@ -274,6 +289,18 @@ function CaseDetailContent({ id }) {
               </ul>
             )}
 
+            {/* {isFinished && rejectedCount > 0 && (
+              <p className="case-message warn" role="status">
+                Hồ sơ đã hoàn tất dù có {rejectedCount} đề xuất từng bị từ chối. Đề xuất bị từ chối đã được điều tra viên
+                làm lại hoặc thay thế trong lần gửi duyệt sau; chỉ {approvedCount} đề xuất được duyệt có hiệu lực.
+              </p>
+            )} */}
+            {isFinished && rejectedCount > 0 && (
+              <p className="case-message info" role="status">
+                Hồ sơ hoàn tất với {approvedCount} đề xuất được duyệt có hiệu lực. Không được thực hiện:{' '}
+                {proposals.filter((p) => p.status === 'Rejected').map((p) => getActionLabel(p.action)).join(', ')} (bị từ chối).
+              </p>
+            )}
             {canEditInvestigation && (
               <form className="case-form" onSubmit={handleAddProposal}>
                 <label htmlFor="proposal-action">Hành động đề xuất</label>

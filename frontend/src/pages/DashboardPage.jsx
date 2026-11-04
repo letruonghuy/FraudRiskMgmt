@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Activity, ArrowLeftRight, CircleAlert, Clock3, FolderOpen, RefreshCw, ShieldAlert, ShieldCheck, UserRoundCheck } from 'lucide-react';
 import axiosClient from '../api/axiosClient';
 import { RISK_CONFIG, STATUS_CONFIG, getErrorMessage } from './alertShared';
-import { CASE_STATUS_CONFIG } from './caseShared';
 import { ML_MODEL_INFO } from './mlExplain';
+import { CASE_STATUS_CONFIG } from './caseUtils';
+
 
 const RISK_ORDER = ['Critical', 'High', 'Medium', 'Low', 'Safe'];
 const STATUS_ORDER = ['New', 'Assigned', 'UnderReview', 'AwaitingApproval', 'Reopened', 'Closed', 'FalsePositive'];
@@ -18,6 +19,8 @@ const PRESETS = [
 
 // Dưới ngưỡng này tỷ lệ báo động giả chưa đủ tin cậy nên không hiển thị
 const MIN_RESOLVED_FOR_RATE = 10;
+// Ít hồ sơ thì tỷ lệ hoàn thành dễ gây hiểu nhầm (ví dụ 0/1 = 0%) nên chỉ hiển thị khi đủ mẫu
+const MIN_CASES_FOR_RATE = 5;
 const formatNumber = (value) => Number(value || 0).toLocaleString('vi-VN');
 // API trả tỷ lệ báo động giả đã nhân 100 (ví dụ 25.5)
 // API trả số phút xử lý trung bình (null nếu chưa có hồ sơ nào đóng trong khoảng đã chọn)
@@ -79,7 +82,7 @@ function StatTile({ icon, label, value, hint, tone, compact }) {
 
 // Thanh ngang: nhãn bên trái, giá trị bên phải; một chiều dữ liệu, màu theo ngữ nghĩa có sẵn của hệ thống
 function BarList({ rows, emptyText }) {
-  const max = Math.max(1, ...rows.map((r) => r.count));
+const max = Math.max(5, ...rows.map((r) => r.count));
   if (rows.every((r) => r.count === 0)) return <p className="case-empty">{emptyText}</p>;
   return (
     <ul className="bar-list">
@@ -96,38 +99,107 @@ function BarList({ rows, emptyText }) {
   );
 }
 
-// Biểu đồ cột theo ngày (SVG, một màu)
-function DailyChart({ data }) {
-  const max = Math.max(1, ...data.map((d) => d.count));
-  const total = data.reduce((sum, d) => sum + d.count, 0);
-  if (total === 0) return <p className="case-empty">Không có giao dịch trong khoảng thời gian này. Thử chọn khoảng dài hơn.</p>;
 
-  const width = 600;
-  const height = 160;
-  const gap = 2;
-  const barWidth = Math.max(2, width / data.length - gap);
-  const step = Math.ceil(data.length / 6);
+const CHART_HEIGHT = 220;
+const MARGIN = { top: 12, right: 16, bottom: 28, left: 44 };
+
+// yyyy-MM-dd -> dd/MM và dd/MM/yyyy (an toàn khi chuỗi rỗng)
+const formatDay = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}` : '');
+const formatFullDay = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '');
+
+// Bước chia trục tung "tròn" (1, 2, 5, 10, 20, 50...) sao cho 5 khoảng phủ hết giá trị lớn nhất
+function niceStep(max) {
+  const raw = Math.max(1, max / 5);
+  const pow = 10 ** Math.floor(Math.log10(raw));
+  const fraction = raw / pow;
+  const nice = fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 5 ? 5 : 10;
+  return nice * pow;
+}
+
+// Khoảng dài thì gộp theo tuần (7 ngày một cột) để cột đủ rộng và đọc được
+function toBuckets(data, weekly) {
+  if (!weekly) return data.map((d) => ({ start: d.date, end: d.date, count: d.count }));
+  const result = [];
+  for (let i = 0; i < data.length; i += 7) {
+    const slice = data.slice(i, i + 7);
+    result.push({
+      start: slice[0].date,
+      end: slice[slice.length - 1].date,
+      count: slice.reduce((sum, d) => sum + d.count, 0),
+    });
+  }
+  return result;
+}
+
+// Biểu đồ cột theo ngày (SVG tự đo bề rộng khung chứa, một màu)
+function DailyChart({ data }) {
+  const wrapRef = useRef(null);
+  const [width, setWidth] = useState(0);
+
+  useEffect(() => {
+    const element = wrapRef.current;
+    if (!element) return undefined;
+    const observer = new ResizeObserver(([entry]) => setWidth(Math.floor(entry.contentRect.width)));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  const total = data.reduce((sum, d) => sum + d.count, 0);
+  if (total === 0) {
+    return (
+      <div className="daily-chart" ref={wrapRef}>
+        <p className="case-empty">Không có giao dịch trong khoảng thời gian này. Thử chọn khoảng dài hơn.</p>
+      </div>
+    );
+  }
+
+  const weekly = data.length > 90;
+  const buckets = toBuckets(data, weekly);
+  const max = Math.max(1, ...buckets.map((b) => b.count));
+  const step = niceStep(max);
+  const top = step * 5;
+  const innerW = Math.max(0, width - MARGIN.left - MARGIN.right);
+  const innerH = CHART_HEIGHT - MARGIN.top - MARGIN.bottom;
+  const slot = innerW / buckets.length;
+  const barW = Math.min(Math.max(slot * 0.68, 1), 36);
+  const labelEvery = Math.max(1, Math.ceil(buckets.length / Math.max(1, Math.floor(innerW / 64))));
+  const unit = weekly ? 'tuần' : 'ngày';
 
   return (
-    <div className="daily-chart">
-      <svg viewBox={`0 0 ${width} ${height + 22}`} role="img" aria-label={`Số giao dịch mỗi ngày, tổng ${total}`}>
-        <line x1="0" y1={height} x2={width} y2={height} className="daily-axis" />
-        {data.map((d, i) => {
-          const h = (d.count / max) * (height - 8);
-          const x = i * (width / data.length);
-          return (
-            <g key={d.date}>
-              <rect x={x} y={height - h} width={barWidth} height={Math.max(h, d.count ? 2 : 0)} rx="2" className="daily-bar">
-                <title>{`${d.date}: ${d.count} giao dịch`}</title>
-              </rect>
-              {i % step === 0 && (
-                <text x={x} y={height + 16} className="daily-tick">{d.date.slice(8)}/{d.date.slice(5, 7)}</text>
-              )}
-            </g>
-          );
-        })}
-      </svg>
-      <p className="daily-caption">Cao nhất {max} giao dịch/ngày · Tổng {formatNumber(total)}</p>
+    <div className="daily-chart" ref={wrapRef}>
+      {width > 0 && (
+        <svg width={width} height={CHART_HEIGHT} viewBox={`0 0 ${width} ${CHART_HEIGHT}`} role="img"
+          aria-label={`Số giao dịch mỗi ${unit}, tổng ${total}`}>
+          {Array.from({ length: 6 }, (_, i) => {
+            const value = step * i;
+            const y = MARGIN.top + innerH - (value / top) * innerH;
+            return (
+              <g key={value}>
+                <line x1={MARGIN.left} x2={width - MARGIN.right} y1={y} y2={y} className={i === 0 ? 'daily-axis' : 'daily-grid'} />
+                <text x={MARGIN.left - 8} y={y + 4} textAnchor="end" className="daily-tick">{formatNumber(value)}</text>
+              </g>
+            );
+          })}
+          {buckets.map((b, i) => {
+            const h = (b.count / top) * innerH;
+            const x = MARGIN.left + i * slot + (slot - barW) / 2;
+            const label = b.start === b.end ? formatFullDay(b.start) : `${formatFullDay(b.start)} – ${formatFullDay(b.end)}`;
+            return (
+              <g key={b.start}>
+                <rect x={x} y={MARGIN.top + innerH - h} width={barW} height={b.count ? Math.max(h, 2) : 0} rx="2" className="daily-bar">
+                  <title>{`${label}: ${formatNumber(b.count)} giao dịch`}</title>
+                </rect>
+                {i % labelEvery === 0 && (
+                  <text x={x + barW / 2} y={CHART_HEIGHT - 8} textAnchor="middle" className="daily-tick">{formatDay(b.start)}</text>
+                )}
+              </g>
+            );
+          })}
+        </svg>
+      )}
+      <p className="daily-caption">
+        Cao nhất {formatNumber(max)} giao dịch/{unit} · Tổng {formatNumber(total)}{weekly ? ' · Gộp theo tuần vì khoảng thời gian dài' : ''}
+      </p>
     </div>
   );
 }
@@ -202,6 +274,8 @@ export default function DashboardPage() {
   const falsePositiveRate = enoughData ? data.falsePositiveRate : null;
   const realPrecision = falsePositiveRate == null ? null : 100 - falsePositiveRate;
   const daily = fillDaily(data.transactionsByDay, range.from, range.to);
+  const officers = data.officerProductivity || [];
+  const showRate = officers.some((o) => o.totalCases >= MIN_CASES_FOR_RATE);
   const activePreset = PRESETS.find((p) => {
     const r = rangeForDays(p.days);
     return r.from === range.from && r.to === range.to;
@@ -265,7 +339,7 @@ export default function DashboardPage() {
         </section>
 
         <section className="detail-section dash-wide" aria-labelledby="dash-daily">
-          <div className="detail-section-heading"><div><p className="detail-eyebrow">{range.from} → {range.to}</p><h2 id="dash-daily">Giao dịch theo ngày</h2></div></div>
+          <div className="detail-section-heading"><div><p className="detail-eyebrow">{formatFullDay(range.from)} → {formatFullDay(range.to)}</p><h2 id="dash-daily">Giao dịch theo ngày</h2></div></div>
           <DailyChart data={daily} />
         </section>
 
@@ -276,24 +350,44 @@ export default function DashboardPage() {
 
         <section className="detail-section" aria-labelledby="dash-officers">
           <div className="detail-section-heading"><div><p className="detail-eyebrow">Hiệu suất</p><h2 id="dash-officers">Điều tra viên</h2></div></div>
-          {(data.officerProductivity || []).length === 0 ? (
+          {officers.length === 0 ? (
             <p className="case-empty">Chưa có hồ sơ nào được mở trong khoảng này.</p>
           ) : (
             <div className="detail-table-scroll">
               <table className="detail-balance-table">
-                <thead><tr><th scope="col">Điều tra viên</th><th scope="col">Hồ sơ</th><th scope="col">Đã xong</th><th scope="col">Tỷ lệ xong</th></tr></thead>
+                <thead>
+                  <tr>
+                  <th scope="col">Điều tra viên</th>
+                  <th scope="col">Hồ sơ</th>
+                  <th scope="col">Chưa xong</th>
+                  <th scope="col">Đã xong</th>
+                  {showRate && <th scope="col">Tỷ lệ xong</th>}
+                </tr>
+                </thead>
                 <tbody>
-                  {data.officerProductivity.map((o) => (
+                  {officers.map((o) => (
                     <tr key={o.officerName}>
                       <th scope="row">{o.officerName}</th>
                       <td>{o.totalCases}</td>
+                      <td>{o.totalCases - o.closedCases}</td>
                       <td>{o.closedCases}</td>
-                      <td>{o.totalCases ? formatPercent((o.closedCases / o.totalCases) * 100) : '—'}</td>
+                      {showRate && (
+                        <td>
+                          {o.totalCases >= MIN_CASES_FOR_RATE
+                            ? formatPercent((o.closedCases / o.totalCases) * 100)
+                            : '—'}
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+          )}
+          {showRate && (
+            <p className="case-empty ml-note">
+              Tỷ lệ xong chỉ hiển thị khi có từ {MIN_CASES_FOR_RATE} hồ sơ, vì mẫu quá nhỏ dễ gây hiểu nhầm. “Chưa xong” là hồ sơ chưa được duyệt.
+            </p>
           )}
         </section>
 
@@ -302,12 +396,14 @@ export default function DashboardPage() {
             <div><p className="detail-eyebrow">Mô hình học máy</p><h2 id="dash-model">{ML_MODEL_INFO.name}</h2></div>
           </div>
           <dl className="alert-detail-fields">
-            <div className="alert-detail-field"><dt>Ngưỡng cảnh báo</dt><dd>{ML_MODEL_INFO.threshold}</dd></div>
+            <div className="alert-detail-field"><dt>Ngưỡng tạo cảnh báo</dt><dd>{formatPercent(ML_MODEL_INFO.alertThreshold * 100)}</dd></div>
+            <div className="alert-detail-field"><dt>Ngưỡng xác định gian lận</dt><dd>{formatPercent(ML_MODEL_INFO.threshold * 100)}</dd></div>
             <div className="alert-detail-field"><dt>Precision (kiểm thử)</dt><dd>{formatPercent(ML_MODEL_INFO.precision * 100)}</dd></div>
             <div className="alert-detail-field"><dt>Recall (kiểm thử)</dt><dd>{formatPercent(ML_MODEL_INFO.recall * 100)}</dd></div>
             <div className="alert-detail-field"><dt>Precision thực tế</dt><dd>{formatPercent(realPrecision)}</dd></div>
+            <div className="alert-detail-field"><dt>Cảnh báo đã xử lý</dt><dd>{formatNumber(resolvedAlerts)} (cần ≥ {MIN_RESOLVED_FOR_RATE} để tính)</dd></div>
           </dl>
-          <p className="case-empty">
+          <p className="case-empty ml-note">
             Chỉ số kiểm thử đo trên tập dữ liệu offline; “precision thực tế” = 100% − tỷ lệ báo động giả của các cảnh báo đã xử lý.
             Hai số lệch nhau nhiều là tín hiệu để xem xét huấn luyện lại mô hình.
           </p>

@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom';
 import { ExternalLink, UserRound, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import axiosClient from '../api/axiosClient';
+import { useAuth } from '../contexts/AuthContext';
+import AlertAssignmentPanel from './AlertAssignmentPanel';
 import {
   RiskBadge, RiskGauge, StatusBadge,
   formatCurrency, formatDate, getCreatedAt, getErrorMessage, maskAccountNumber,
@@ -17,22 +19,22 @@ function DrawerRow({ label, value }) {
   );
 }
 
-export default function AlertDrawer({ alert, onClose }) {
+// `alert` là dòng được chọn trong danh sách (đã có sẵn dữ liệu cơ bản để hiện ngay); có thể chỉ gồm alertId
+// khi mở bằng link trực tiếp. Chi tiết đầy đủ (loại giao dịch, số dư...) được tải thêm từ /Alert/{id}.
+// Danh sách render drawer với key={alertId}, nên đổi cảnh báo = mount lại, state tự về ban đầu.
+// `onChanged` báo cho danh sách tải lại sau khi nhận / phân công.
+export default function AlertDrawer({ alert, onClose, onChanged }) {
+  const { role } = useAuth();
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState('');
   const closeRef = useRef(null);
 
-    useEffect(() => {
+  useEffect(() => {
     let isActive = true;
 
     axiosClient.get(`/Alert/${alert.alertId}`)
       .then((res) => { if (isActive) setDetail(res.data); })
-      .catch((err) => {
-        if (isActive) {
-          setDetail(null);
-          setError(getErrorMessage(err));
-        }
-      });
+      .catch((err) => { if (isActive) setError(getErrorMessage(err)); });
 
     return () => { isActive = false; };
   }, [alert.alertId]);
@@ -49,6 +51,12 @@ export default function AlertDrawer({ alert, onClose }) {
       previouslyFocused?.focus?.();
     };
   }, [onClose]);
+
+  const refreshDetail = async () => {
+    const res = await axiosClient.get(`/Alert/${alert.alertId}`);
+    setDetail(res.data);
+    onChanged?.();
+  };
 
   const data = detail || alert;
 
@@ -99,6 +107,8 @@ export default function AlertDrawer({ alert, onClose }) {
               <DrawerRow label="Hồ sơ điều tra" value={detail ? (detail.caseId ? `#${detail.caseId}` : 'Chưa tạo hồ sơ') : (error ? '—' : 'Đang tải...')} />
             </dl>
           </section>
+
+          {detail && <AlertAssignmentPanel alert={detail} role={role} onChanged={refreshDetail} />}
 
           {error && <p className="detail-action-error" role="alert">Không tải được chi tiết đầy đủ: {error}</p>}
         </div>

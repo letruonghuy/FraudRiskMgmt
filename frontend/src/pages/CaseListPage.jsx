@@ -4,7 +4,8 @@ import { AlertTriangle, BriefcaseBusiness, ChevronLeft, ChevronRight, Filter, Re
 import { Link, useNavigate } from 'react-router-dom';
 import axiosClient from '../api/axiosClient';
 import { formatDate } from './alertShared';
-import { CASE_STATUS_CONFIG, CaseStatusBadge as StatusBadge } from './caseShared';
+import { CASE_STATUS_CONFIG } from './caseUtils';
+import { CaseStatusBadge as StatusBadge } from './caseShared';
 
 export default function CaseListPage() {
   const navigate = useNavigate();
@@ -135,7 +136,7 @@ export default function CaseListPage() {
         ) : cases.length === 0 ? (
           <div className="empty-state">
             <BriefcaseBusiness size={48} />
-            <h3>{pageMeta.totalCount === 0 ? 'Chưa có hồ sơ nào' : 'Không có hồ sơ phù hợp'}</h3>
+            <h2>{pageMeta.totalCount === 0 ? 'Chưa có hồ sơ nào' : 'Không có hồ sơ phù hợp'}</h2>
             <p>
               {pageMeta.totalCount === 0
                 ? 'Hồ sơ sẽ xuất hiện ở đây khi cảnh báo được chuyển sang quy trình điều tra.'

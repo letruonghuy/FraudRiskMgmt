@@ -1,14 +1,14 @@
-// Thông tin mô hình lấy từ gói random_forest.pkl và notebook 01_explore.ipynb.
-// Khi huấn luyện lại mô hình, cập nhật file này (hoặc chuyển sang API trả về cùng cấu trúc).
+
 export const ML_MODEL_INFO = {
   name: 'Random Forest',
   threshold: 0.89,
+  alertThreshold: 0.3,
   precision: 0.9867,
   recall: 0.9781,
   f1: 0.9824,
   rocAuc: 0.9931,
   prAuc: 0.9708,
-  trainedOn: 'PaySim — chỉ giao dịch CASH_OUT và TRANSFER, cân bằng bằng SMOTE',
+  trainedOn: 'PaySim — chỉ giao dịch CASH_OUT và TRANSFER, dữ liệu được cân bằng bằng SMOTE',
 };
 
 // Độ quan trọng toàn cục (feature_importances_ của mô hình đã lưu).

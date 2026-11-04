@@ -1,3 +1,5 @@
+/* eslint-disable react-refresh/only-export-components */
+// Dùng chung cho AlertListPage, AlertDrawer, AlertDetailPage và CaseDetailPage
 export const RISK_CONFIG = {
   Critical: { label: 'Nghiêm trọng', color: '#ef4444', bg: 'rgba(239,68,68,0.12)', border: 'rgba(239,68,68,0.3)' },
   High:     { label: 'Cao', color: '#f97316', bg: 'rgba(249,115,22,0.12)', border: 'rgba(249,115,22,0.3)' },
@@ -28,6 +30,9 @@ export const formatDate = (value) => {
   return Number.isNaN(date.getTime()) ? 'Không xác định' : date.toLocaleString('vi-VN');
 };
 
+// Hàng đợi = Alert ở trạng thái New và chưa có người phụ trách (khớp đặc tả mục 5.2)
+export const isInQueue = (alert) => alert?.assignedTo == null && alert?.status === 'New';
+
 export const maskAccountNumber = (value) => {
   if (!value) return '—';
   const account = String(value);
@@ -56,6 +61,45 @@ export const toRiskPercent = (score) =>
 // API danh sách trả về `createAt`, API chi tiết trả về `createdAt` → hỗ trợ cả hai
 export const getCreatedAt = (alert) => alert?.createdAt ?? alert?.createAt;
 
+// Cảnh báo còn mở = chưa đóng và chưa là báo động giả
+const OPEN_STATUSES = new Set(['New', 'Assigned', 'UnderReview', 'AwaitingApproval', 'Reopened']);
+// Ngưỡng tồn đọng (giờ) theo mức rủi ro. Đây là số mình đề xuất, bạn chỉnh theo quy định của đề tài.
+const SLA_HOURS = { Critical: 24, High: 72, Medium: 168, Low: 336, Safe: 336 };
+
+export const getBacklog = (alert, now) => {
+  if (!OPEN_STATUSES.has(alert?.status)) return null;
+  const created = new Date(getCreatedAt(alert)).getTime();
+  if (Number.isNaN(created)) return null;
+  const hours = Math.max(0, (now - created) / 3600000);
+  return { hours, overdue: hours > (SLA_HOURS[alert.riskLevel] ?? 168) };
+};
+
+export const formatAge = (hours) => {
+  if (hours < 1) return 'Dưới 1 giờ';
+  if (hours < 48) return `${Math.floor(hours)} giờ`;
+  return `${Math.floor(hours / 24)} ngày`;
+};
+
+// Dạng ngắn cho danh sách (không hiện giây)
+export const formatDateShort = (value) => {
+  if (!value) return 'Chưa ghi nhận';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? 'Không xác định'
+    : date.toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
+
+export const BacklogCell = ({ alert, now }) => {
+  const info = getBacklog(alert, now);
+  if (!info) return <span className="cell-time">—</span>;
+  return (
+    <span className={`backlog ${info.overdue ? 'overdue' : ''}`}>
+      {formatAge(info.hours)}
+      {info.overdue && <span className="backlog-flag">Quá hạn</span>}
+    </span>
+  );
+};
+
 // ── Components ───────────────────────────────────────────
 export const RiskBadge = ({ level }) => {
   const cfg = RISK_CONFIG[level] || { ...FALLBACK_STYLE, label: level || 'Chưa xác định' };
@@ -73,7 +117,7 @@ export const RiskGauge = ({ score, level }) => {
   return (
     <div className="risk-gauge" role="meter" aria-label="Điểm rủi ro" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} aria-valuetext={`${pct}%`}>
       <div className="risk-gauge-bar">
-        <div className="risk-gauge-fill" style={{ width: `${pct}%`, backgroundColor: cfg.color }} />
+        <div className="risk-gauge-fill" style={{ transform: `scaleX(${pct / 100})`, backgroundColor: cfg.color }} />
       </div>
       <span className="risk-gauge-label" style={{ color: cfg.color }}>{pct}%</span>
     </div>

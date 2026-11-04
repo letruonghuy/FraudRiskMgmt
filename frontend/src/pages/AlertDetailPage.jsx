@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, AlertTriangle, Check, CircleAlert, Clock3, FilePlus2, RefreshCw, ShieldCheck, UserRound } from 'lucide-react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import axiosClient from '../api/axiosClient';
@@ -7,6 +7,7 @@ import {
   RISK_CONFIG, STATUS_CONFIG,
   formatCurrency, formatDate, getCreatedAt, getErrorMessage, maskAccountNumber, toRiskPercent,
 } from './alertShared';
+import AlertAssignmentPanel from './AlertAssignmentPanel';
 import MlExplanation from './MlExplanation';
 
 // ── Tiến trình xử lý ─────────────────────────────────────
@@ -86,6 +87,14 @@ function buildBalanceSignals(alert) {
   return signals;
 }
 
+// Mã gửi/nhận trong giao dịch: giữ 2 ký tự đầu (loại tài khoản, ví dụ C1, M1) và 4 ký tự cuối
+// để vẫn phân biệt được bên gửi với bên nhận mà không lộ cả mã.
+const maskTransactionId = (value) => {
+  if (!value) return '—';
+  const text = String(value);
+  return text.length > 6 ? `${text.slice(0, 2)}•••• ${text.slice(-4)}` : text;
+};
+
 const balanceChange = (before, after) => {
   if (!hasValue(before) || !hasValue(after)) return null;
   return Number(after) - Number(before);
@@ -164,6 +173,12 @@ export default function AlertDetailPage() {
       setCreatingCase(false);
     }
   };
+
+  // Tải lại âm thầm sau khi nhận / trả / phân công (không hiện màn hình loading)
+  const refreshAlert = useCallback(async () => {
+    const response = await axiosClient.get(`/Alert/${id}`);
+    setAlert(response.data);
+  }, [id]);
 
   const handleRetry = () => setReloadKey((current) => current + 1);
 
@@ -267,10 +282,14 @@ export default function AlertDetailPage() {
               <DetailField label="Thời gian giao dịch" value={formatDate(alert.transactionTime)} />
               <DetailField label="Số tiền" value={formatCurrency(alert.amount)} emphasized />
               <DetailField label="Khách hàng" value={alert.customerName} />
-              <DetailField label="Tài khoản khách hàng" value={maskAccountNumber(alert.customerAccountNumber)} />
-              <DetailField label="Tài khoản nguồn" value={alert.nameOrig} />
-              <DetailField label="Tài khoản đích" value={alert.nameDest} />
+              <DetailField label="Số tài khoản khách hàng" value={maskAccountNumber(alert.customerAccountNumber)} />
+              <DetailField label="Mã tài khoản gửi trong giao dịch" value={maskTransactionId(alert.nameOrig)} />
+              <DetailField label="Mã tài khoản nhận trong giao dịch" value={maskTransactionId(alert.nameDest)} />
             </dl>
+            <p className="case-empty ml-note">
+              Số tài khoản khách hàng lấy từ hồ sơ khách hàng; mã gửi và mã nhận là mã ghi trong dữ liệu giao dịch.
+              Cả ba đều được che một phần.
+            </p>
           </section>
 
           <section className="detail-section" aria-labelledby="balance-heading">
@@ -341,6 +360,8 @@ export default function AlertDetailPage() {
                 <strong>{alert.caseId ? `Đã liên kết #${alert.caseId}` : 'Chưa tạo hồ sơ'}</strong>
               </div>
             </div>
+
+            <AlertAssignmentPanel alert={alert} role={role} onChanged={refreshAlert} />
 
             {canCreateCase && (
               <div className="detail-action-area">
