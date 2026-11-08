@@ -16,6 +16,7 @@ namespace FraudRiskMgmt.API.DTOs
         public DateTime CreatedAt { get; set; }
         public string TransactionType { get; set; } = string.Empty;
         public DateTime TransactionTime { get; set; }
+        public int? Hour { get; set; }
         public string NameOrig { get; set; } = string.Empty;
         public string NameDest { get; set; } = string.Empty;
         public double OldBalanceOrg { get; set; }

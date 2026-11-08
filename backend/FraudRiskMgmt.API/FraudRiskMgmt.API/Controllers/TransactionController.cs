@@ -13,17 +13,22 @@ namespace FraudRiskMgmt.API.Controllers
     [ApiController]
     public class TransactionController : ControllerBase
     {
+
         private readonly MLService _mlService;
         private readonly AppDbContext _appDbContext;
+        private readonly RiskPolicy _policy;
         private readonly ILogger<TransactionController> _logger;
+
 
         public TransactionController(
             MLService mLService,
             AppDbContext appDbcontext,
+            RiskPolicy policy,
             ILogger<TransactionController> logger)
         {
             _mlService = mLService;
             _appDbContext = appDbcontext;
+            _policy = policy;   
             _logger = logger;
         }
 
@@ -31,6 +36,9 @@ namespace FraudRiskMgmt.API.Controllers
         [Authorize(Roles = "Officer")]
         public async Task<IActionResult> Predict([FromBody] TransactionRequest request)
         {
+            request.ErrorBalanceOrig = request.OldBalanceOrg - request.NewBalanceOrig - request.Amount;
+            request.ErrorBalanceDest = request.NewBalanceDest - request.OldBalanceDest - request.Amount;
+
             var result = await _mlService.PredictAsync(request);
 
             using var dbTransaction = await _appDbContext.Database.BeginTransactionAsync();
@@ -48,17 +56,15 @@ namespace FraudRiskMgmt.API.Controllers
                     TransactionType = request.TransactionType,
                     NameOrig = request.NameOrig,
                     NameDest = request.NameDest,
-                    RiskLevel = result.RiskScore >= 0.89 ? RiskLevels.Critical :
-                                result.RiskScore >= 0.75 ? RiskLevels.High :
-                                result.RiskScore >= 0.50 ? RiskLevels.Medium :
-                                result.RiskScore >= 0.30 ? RiskLevels.Low : RiskLevels.Safe,
+                    RiskLevel = _policy.Classify(result.RiskScore, request.Amount),
                     TransactionTime = DateTime.UtcNow,
+                    Hour = request.Hour,
                 };
 
                 _appDbContext.Transactions.Add(transaction);
                 await _appDbContext.SaveChangesAsync();
 
-                if (result.RiskScore >= 0.3)
+                if (_policy.ShouldAlert(result.RiskScore))
                 {
                     var alert = new Alert
                     {

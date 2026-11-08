@@ -162,6 +162,7 @@ namespace FraudRiskMgmt.API.Controllers
                     CreatedAt = alert.CreatedAt,
                     TransactionType = alert.Transaction.TransactionType,
                     TransactionTime = alert.Transaction.TransactionTime,
+                    Hour = alert.Transaction.Hour,
                     NameOrig = alert.Transaction.NameOrig,
                     NameDest = alert.Transaction.NameDest,
                     OldBalanceOrg = alert.Transaction.OldBalanceOrg,

@@ -267,6 +267,9 @@ namespace FraudRiskMgmt.API.Migrations
                     b.Property<DateTime?>("DeletedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<int?>("Hour")
+                        .HasColumnType("int");
+
                     b.Property<string>("NameDest")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");

@@ -46,6 +46,10 @@ builder.Services.AddCors(options =>
 builder.Services.AddScoped<PasswordService>();
 builder.Services.AddScoped<JwtService>();
 builder.Services.AddScoped<AuditLogService>();
+
+
+builder.Services.Configure<RiskPolicyOptions>(builder.Configuration.GetSection("RiskPolicy"));
+builder.Services.AddSingleton<RiskPolicy>();
 // Add services to the container.
 
 //builder.Services.AddControllers();

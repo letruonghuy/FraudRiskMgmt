@@ -18,6 +18,7 @@ namespace FraudRiskMgmt.API.Models
         public string RiskLevel { get; set; } = string.Empty;
         public string NameOrig { get; set; } = string.Empty;
         public string NameDest { get; set; } = string.Empty;
+        public int? Hour { get; set; }
         public DateTime? DeletedAt { get; set; } = null;
         public Customer? Customer { get; set; } = null!;
 
