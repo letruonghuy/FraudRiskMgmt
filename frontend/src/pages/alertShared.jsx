@@ -64,7 +64,8 @@ export const getCreatedAt = (alert) => alert?.createdAt ?? alert?.createAt;
 // Cảnh báo còn mở = chưa đóng và chưa là báo động giả
 const OPEN_STATUSES = new Set(['New', 'Assigned', 'UnderReview', 'AwaitingApproval', 'Reopened']);
 // Ngưỡng tồn đọng (giờ) theo mức rủi ro. Đây là số mình đề xuất, bạn chỉnh theo quy định của đề tài.
-const SLA_HOURS = { Critical: 24, High: 72, Medium: 168, Low: 336, Safe: 336 };
+//const SLA_HOURS = { Critical: 24, High: 72, Medium: 168, Low: 336, Safe: 336 };
+const SLA_HOURS = { Critical: 4, High: 24, Medium: 48, Low: 72, Safe: 72 };
 
 export const getBacklog = (alert, now) => {
   if (!OPEN_STATUSES.has(alert?.status)) return null;

@@ -5,9 +5,8 @@ import { RISK_CONFIG, formatCurrency, toRiskPercent } from './alertShared';
 const MONEY_KEYS = new Set(['errorBalanceOrig', 'errorBalanceDest', 'oldbalanceOrg', 'newbalanceOrig', 'oldbalanceDest', 'newbalanceDest', 'amount']);
 
 function formatFeature(key, value) {
-  if (value === null) return '—';
-  if (key === 'hour') return `${String(value).padStart(2, '0')}h`;
-  if (key === 'is_merchant') return value ? 'Có' : 'Không';
+  if (value === null || value === undefined) return '—';
+  if (key === 'hour') return `${String(value).padStart(2, '0')}:00`;
   if (MONEY_KEYS.has(key)) return formatCurrency(value);
   return String(value);
 }
@@ -17,10 +16,8 @@ export default function MlExplanation({ alert }) {
   const score = Number(alert.riskScore) || 0;
   const scorePct = toRiskPercent(score);
   const scoreLabel = (score * 100).toLocaleString('vi-VN', { maximumFractionDigits: 1 });
-  const fraudPct = Math.round(ML_MODEL_INFO.threshold * 100);
-  const alertPct = Math.round(ML_MODEL_INFO.alertThreshold * 100);
+  const thresholdPct = Math.round(ML_MODEL_INFO.threshold * 100);
   const levelLabel = RISK_CONFIG[alert.riskLevel]?.label;
-  const overFraudThreshold = score >= ML_MODEL_INFO.threshold;
   const maxImportance = Math.max(...FEATURE_META.map((f) => f.importance));
   const rows = [...FEATURE_META].sort((a, b) => b.importance - a.importance);
 
@@ -35,26 +32,15 @@ export default function MlExplanation({ alert }) {
       </div>
 
       <p className="ml-verdict">
-        {overFraudThreshold ? (
-          <>
-           Điểm rủi ro <strong>{scoreLabel}%</strong> vượt ngưỡng <strong>{fraudPct}%</strong>: mô hình xác định đây là giao dịch
-            có khả năng gian lận cao{levelLabel ? ` (mức ${levelLabel})` : ''}.
-          </>
-        ) : (
-          <>
-            Điểm rủi ro <strong>{scoreLabel}%</strong> chưa tới ngưỡng <strong>{fraudPct}%</strong> mà mô hình dùng để kết luận gian lận,
-            nhưng đã vượt ngưỡng tạo cảnh báo <strong>{alertPct}%</strong>. Hệ thống tạo cảnh báo{levelLabel ? ` mức ${levelLabel}` : ''} để
-            điều tra viên xem xét, không tự kết luận.
-          </>
-        )}
+        Điểm rủi ro <strong>{scoreLabel}%</strong> đạt ngưỡng <strong>{thresholdPct}%</strong> mà mô hình dùng để đánh dấu
+        giao dịch đáng ngờ{levelLabel ? ` (mức ${levelLabel})` : ''}. Hệ thống tạo cảnh báo để điều tra viên xem xét, không tự kết luận.
       </p>
       <div className="ml-threshold" aria-hidden="true">
         <span className="ml-threshold-fill" style={{ width: `${scorePct}%` }} />
-        <span className="ml-threshold-mark" style={{ left: `${alertPct}%`, opacity: 0.55 }} />
-        <span className="ml-threshold-mark" style={{ left: `${fraudPct}%` }} />
+        <span className="ml-threshold-mark" style={{ left: `${thresholdPct}%` }} />
       </div>
       <p className="case-empty ml-note">
-        Vạch mờ {alertPct}%: ngưỡng tạo cảnh báo. Vạch đậm {fraudPct}%: ngưỡng mô hình xác định gian lận.
+        Vạch đứng {thresholdPct}%: ngưỡng tạo cảnh báo, chọn bằng F1 lớn nhất trên tập validation.
       </p>
 
       <div className="detail-table-scroll" role="region" aria-label="Đặc trưng đầu vào của mô hình" tabIndex={0}>

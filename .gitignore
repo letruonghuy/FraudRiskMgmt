@@ -45,4 +45,9 @@ Thumbs.db
 .claude/
 .github/agents/
 .github/skills/
+
+
+fraud-detection-ml/data/*.csv
+!fraud-detection-ml/data/simulator_source.csv
 .impeccable/
+
