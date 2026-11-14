@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, AlertTriangle, Check, CircleAlert, Clock3, FilePlus2, RefreshCw, ShieldCheck, UserRound } from 'lucide-react';
+import { ArrowLeft, AlertTriangle, Check, CheckCircle2, CircleAlert, Clock3, FilePlus2, RefreshCw, ShieldCheck, UserRound } from 'lucide-react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import axiosClient from '../api/axiosClient';
 import { useAuth } from '../contexts/AuthContext';
@@ -87,8 +87,6 @@ function buildBalanceSignals(alert) {
   return signals;
 }
 
-// Mã gửi/nhận trong giao dịch: giữ 2 ký tự đầu (loại tài khoản, ví dụ C1, M1) và 4 ký tự cuối
-// để vẫn phân biệt được bên gửi với bên nhận mà không lộ cả mã.
 const maskTransactionId = (value) => {
   if (!value) return '—';
   const text = String(value);
@@ -116,6 +114,11 @@ function DetailField({ label, value, emphasized = false }) {
   );
 }
 
+const extractResponseText = (response, fallback) => {
+  if (typeof response?.data === 'string' && response.data) return response.data;
+  return response?.data?.message || fallback;
+};
+
 export default function AlertDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -123,9 +126,19 @@ export default function AlertDetailPage() {
   const [alert, setAlert] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [creatingCase, setCreatingCase] = useState(false);
+  const [busy, setBusy] = useState('');
   const [actionError, setActionError] = useState('');
+  const [actionSuccess, setActionSuccess] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
+
+  // State cho xử lý trực tiếp trên Alert (Officer)
+  const [resolution, setResolution] = useState('FalsePositive');
+  const [closeNote, setCloseNote] = useState('');
+
+  // State gợi ý gộp vào Case đang mở của cùng khách hàng
+  const [openCasesForAlert, setOpenCasesForAlert] = useState({ alertId: null, items: [] });
+  const [targetCaseId, setTargetCaseId] = useState('');
+  const openCases = openCasesForAlert.alertId === alert?.alertId ? openCasesForAlert.items : [];
 
   useEffect(() => {
     let isActive = true;
@@ -147,6 +160,34 @@ export default function AlertDetailPage() {
     return () => { isActive = false; };
   }, [id, reloadKey]);
 
+  useEffect(() => {
+    const canCheckOpenCases = role === 'Officer' &&
+      alert &&
+      !alert.caseId &&
+      alert.assignedTo != null &&
+      user?.userId != null &&
+      String(alert.assignedTo) === String(user.userId) &&
+      !['Closed', 'FalsePositive', 'AwaitingApproval'].includes(alert.status);
+
+    if (!canCheckOpenCases) return undefined;
+
+    let isActive = true;
+    axiosClient.get(`/Case/open-for-alert/${alert.alertId}`)
+      .then((res) => {
+        if (!isActive || !Array.isArray(res.data)) return;
+        setOpenCasesForAlert({ alertId: alert.alertId, items: res.data });
+        setTargetCaseId(res.data[0] ? String(res.data[0].caseId) : '');
+      })
+      .catch(() => { /* bỏ qua nếu không tải được gợi ý */ });
+
+    return () => { isActive = false; };
+  }, [alert, role, user?.userId]);
+
+  const refreshAlert = useCallback(async () => {
+    const response = await axiosClient.get(`/Alert/${id}`);
+    setAlert(response.data);
+  }, [id]);
+
   const risk = RISK_CONFIG[alert?.riskLevel] || RISK_CONFIG.Safe;
   const riskPercent = toRiskPercent(alert?.riskScore);
   const statusCfg = STATUS_CONFIG[alert?.status];
@@ -155,14 +196,47 @@ export default function AlertDetailPage() {
     user?.userId != null &&
     String(alert.assignedTo) === String(user.userId);
   const isClosed = alert?.status === 'Closed' || alert?.status === 'FalsePositive';
-  const canCreateCase = Boolean(alert && isAssignedOfficer && !alert.caseId && !isClosed);
+  const isHighImpactRisk = alert?.riskLevel === 'High' || alert?.riskLevel === 'Critical';
+  const canOfficerAct = Boolean(
+    alert && isAssignedOfficer && !alert.caseId && !isClosed && alert.status !== 'AwaitingApproval'
+  );
+  const effectiveResolution = isHighImpactRisk && resolution === 'Cleared' ? 'FalsePositive' : resolution;
   const signals = alert ? buildBalanceSignals(alert) : [];
 
-  const handleCreateCase = async () => {
-    if (!alert || creatingCase) return;
+  const handleDirectResolve = async (event) => {
+    event.preventDefault();
+    const note = closeNote.trim();
+    if (!alert || busy || !note) return;
 
-    setCreatingCase(true);
+    const confirmText = effectiveResolution === 'FalsePositive'
+      ? 'Đóng cảnh báo này với kết luận Báo động giả?'
+      : 'Xác nhận giao dịch an toàn (mức rủi ro thấp/trung bình) và đóng cảnh báo này?';
+    if (!window.confirm(confirmText)) return;
+
+    setBusy('close');
     setActionError('');
+    setActionSuccess('');
+    try {
+      const response = await axiosClient.put(`/Alert/${alert.alertId}/close`, {
+        resolution: effectiveResolution,
+        note,
+      });
+      setCloseNote('');
+      setActionSuccess(extractResponseText(response, 'Đã cập nhật xử lý cảnh báo.'));
+      await refreshAlert();
+    } catch (requestError) {
+      setActionError(getErrorMessage(requestError));
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const handleCreateCase = async () => {
+    if (!alert || busy) return;
+
+    setBusy('case');
+    setActionError('');
+    setActionSuccess('');
     try {
       const response = await axiosClient.post('/Case', { alertId: alert.alertId });
       const newCaseId = response.data?.caseId;
@@ -170,15 +244,25 @@ export default function AlertDetailPage() {
     } catch (requestError) {
       setActionError(getErrorMessage(requestError));
     } finally {
-      setCreatingCase(false);
+      setBusy('');
     }
   };
 
-  // Tải lại âm thầm sau khi nhận / trả / phân công (không hiện màn hình loading)
-  const refreshAlert = useCallback(async () => {
-    const response = await axiosClient.get(`/Alert/${id}`);
-    setAlert(response.data);
-  }, [id]);
+  const handleMergeIntoExistingCase = async () => {
+    if (!alert || !targetCaseId || busy) return;
+
+    setBusy('merge');
+    setActionError('');
+    setActionSuccess('');
+    try {
+      await axiosClient.post(`/Case/${targetCaseId}/alerts`, { alertId: alert.alertId });
+      navigate(`/cases/${targetCaseId}`);
+    } catch (requestError) {
+      setActionError(getErrorMessage(requestError));
+    } finally {
+      setBusy('');
+    }
+  };
 
   const handleRetry = () => setReloadKey((current) => current + 1);
 
@@ -363,15 +447,103 @@ export default function AlertDetailPage() {
 
             <AlertAssignmentPanel alert={alert} role={role} onChanged={refreshAlert} />
 
-            {canCreateCase && (
-              <div className="detail-action-area">
-                {actionError && <p className="detail-action-error" role="alert">{actionError}</p>}
-                <button className="detail-primary-action" type="button" onClick={handleCreateCase} disabled={creatingCase}>
-                  <FilePlus2 size={17} aria-hidden="true" />
-                  {creatingCase ? 'Đang tạo hồ sơ...' : 'Tạo hồ sơ điều tra'}
-                </button>
-                <p>Hồ sơ sẽ được mở dưới tài khoản điều tra viên đang phụ trách cảnh báo.</p>
-              </div>
+            {actionError && <p className="detail-action-error" role="alert">{actionError}</p>}
+            {actionSuccess && <p className="case-message success" role="status">{actionSuccess}</p>}
+
+            {canOfficerAct && (
+              <>
+                <div className="assign-panel">
+                  <p className="assign-title">Xử lý trực tiếp trên cảnh báo</p>
+                  <p className="assign-hint">
+                    {isHighImpactRisk
+                      ? 'Cảnh báo mức Cao/Nghiêm trọng chỉ được đóng trực tiếp nếu là Báo động giả; nếu nghi ngờ gian lận, vui lòng tạo Hồ sơ điều tra.'
+                      : 'Dùng cho cảnh báo mức Thấp/Trung bình không gây ảnh hưởng lớn — kết quả được lưu thẳng vào nhật ký hệ thống.'}
+                  </p>
+
+                  <form className="case-form" onSubmit={handleDirectResolve}>
+                    <label htmlFor="alert-resolution">Kết luận xử lý</label>
+                    <select
+                      id="alert-resolution"
+                      className="select-dark"
+                      value={effectiveResolution}
+                      onChange={(e) => setResolution(e.target.value)}
+                      disabled={Boolean(busy)}
+                      style={{ width: '100%' }}
+                    >
+                      <option value="FalsePositive">Báo động giả (Hệ thống nhận diện nhầm)</option>
+                      {!isHighImpactRisk && (
+                        <option value="Cleared">Xác minh an toàn (Mức Thấp/Trung bình — Đóng trực tiếp)</option>
+                      )}
+                    </select>
+
+                    <label htmlFor="alert-close-note">Ghi chú kết luận (bắt buộc)</label>
+                    <textarea
+                      id="alert-close-note"
+                      rows={3}
+                      maxLength={1000}
+                      placeholder={
+                        effectiveResolution === 'FalsePositive'
+                          ? 'Ví dụ: Giao dịch quen thuộc của khách hàng, mô hình ML cảnh báo nhầm...'
+                          : 'Ví dụ: Đã đối chiếu giao dịch mức trung bình, hợp lệ và không ảnh hưởng khách hàng...'
+                      }
+                      value={closeNote}
+                      onChange={(e) => setCloseNote(e.target.value)}
+                      disabled={Boolean(busy)}
+                    />
+
+                    <div className="case-form-actions">
+                      <button
+                        className="detail-primary-action"
+                        type="submit"
+                        disabled={Boolean(busy) || closeNote.trim().length === 0}
+                      >
+                        <CheckCircle2 size={16} aria-hidden="true" />
+                        {busy === 'close' ? 'Đang lưu...' : 'Chốt & Đóng cảnh báo'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+
+                <div className="detail-action-area">
+                  {openCases.length > 0 && (
+                    <div className="assign-panel" style={{ marginBottom: 10 }}>
+                      <p className="assign-title">Khách hàng đang có hồ sơ mở</p>
+                      <p className="assign-hint">
+                        Gộp cảnh báo này vào hồ sơ đang điều tra để xử lý chung thay vì mở hồ sơ mới:
+                      </p>
+                      <div className="assign-row">
+                        <select
+                          aria-label="Chọn hồ sơ đang mở"
+                          className="select-dark"
+                          value={targetCaseId}
+                          onChange={(e) => setTargetCaseId(e.target.value)}
+                          disabled={Boolean(busy)}
+                        >
+                          {openCases.map((c) => (
+                            <option key={c.caseId} value={c.caseId}>
+                              Hồ sơ #{c.caseId} ({c.alertCount} cảnh báo · {c.status})
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          className="detail-primary-action"
+                          type="button"
+                          onClick={handleMergeIntoExistingCase}
+                          disabled={Boolean(busy) || !targetCaseId}
+                        >
+                          {busy === 'merge' ? 'Đang gộp...' : 'Gộp vào hồ sơ'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <p>Hoặc mở một hồ sơ điều tra độc lập cho cảnh báo này:</p>
+                  <button className="sort-toggle" type="button" onClick={handleCreateCase} disabled={Boolean(busy)}>
+                    <FilePlus2 size={16} aria-hidden="true" />
+                    {busy === 'case' ? 'Đang tạo hồ sơ...' : 'Tạo hồ sơ điều tra mới'}
+                  </button>
+                </div>
+              </>
             )}
 
             {alert.caseId && (
@@ -379,7 +551,7 @@ export default function AlertDetailPage() {
             )}
 
             {role === 'Officer' && !isAssignedOfficer && !alert.caseId && !isClosed && (
-              <p className="detail-permission-note">Chỉ điều tra viên được phân công mới có thể mở hồ sơ điều tra.</p>
+              <p className="detail-permission-note">Chỉ điều tra viên được phân công mới có thể xử lý cảnh báo này.</p>
             )}
           </section>
         </aside>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, ChevronLeft, ChevronRight, ListFilter, RefreshCw, Search } from 'lucide-react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { AlertTriangle, BriefcaseBusiness, ChevronLeft, ChevronRight, ListFilter, RefreshCw, Search } from 'lucide-react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import axiosClient from '../api/axiosClient';
 import { useAuth } from '../contexts/AuthContext';
 import AlertDrawer from './AlertDrawer';
@@ -20,7 +20,7 @@ const SORT_OPTIONS = {
 };
 
 export default function AlertListPage() {
-  const { role } = useAuth();
+  const { role, user } = useAuth();
   const [alerts, setAlerts]       = useState([]);
   const [pageMeta, setPageMeta]   = useState({ page: 1, pageSize: PAGE_SIZE, totalCount: 0 });
   const [queueCount, setQueueCount] = useState(0);
@@ -35,6 +35,10 @@ export default function AlertListPage() {
   const [page, setPage]           = useState(1);
   const [reloadKey, setReloadKey] = useState(0);
   const [now, setNow] = useState(() => Date.now());
+  const navigate = useNavigate();
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [merging, setMerging] = useState(false);
+  const [mergeError, setMergeError] = useState('');
 
   // Alert đang mở trong drawer được lưu trên URL (?selected=3) → F5 hoặc gửi link vẫn mở đúng alert
   const [searchParams, setSearchParams] = useSearchParams();
@@ -137,6 +141,36 @@ export default function AlertListPage() {
     }
   };
 
+  const isMergeable = (alert) =>
+    role === 'Officer' &&
+    !alert.caseId &&
+    user?.userId != null &&
+    String(alert.assignedTo) === String(user.userId) &&
+    ['Assigned', 'UnderReview', 'Reopened'].includes(alert.status);
+
+  const toggleSelect = (alertId) => {
+    setMergeError('');
+    setSelectedIds((prev) =>
+      prev.includes(alertId) ? prev.filter((id) => id !== alertId) : [...prev, alertId]
+    );
+  };
+
+  const handleMergeSelected = async () => {
+    if (selectedIds.length < 2 || merging) return;
+    setMerging(true);
+    setMergeError('');
+    try {
+      const response = await axiosClient.post('/Case/merge', { alertIds: selectedIds });
+      const newCaseId = response.data?.caseId;
+      setSelectedIds([]);
+      navigate(newCaseId ? `/cases/${newCaseId}` : '/cases');
+    } catch (err) {
+      setMergeError(getErrorMessage(err));
+    } finally {
+      setMerging(false);
+    }
+  };
+
   const hasFilter = Boolean(statusFilter || riskFilter || search || scope !== 'all');
   const clearFilters = () => {
     setSearchInput(''); setSearch(''); setStatus(''); setRisk(''); setScope('all'); setPage(1);
@@ -201,6 +235,33 @@ export default function AlertListPage() {
           </button>
         </div>
       </div>
+      {role === 'Officer' && selectedIds.length > 0 && (
+        <div className="toolbar" role="region" aria-label="Thao tác gộp cảnh báo">
+          <div className="toolbar-left">
+            <span>Đã chọn <strong>{selectedIds.length}</strong> cảnh báo</span>
+            {mergeError && <span className="detail-action-error" role="alert">{mergeError}</span>}
+          </div>
+          <div className="toolbar-right" style={{ display: 'flex', gap: 8 }}>
+            <button
+              type="button"
+              className="sort-toggle"
+              onClick={() => { setSelectedIds([]); setMergeError(''); }}
+              disabled={merging}
+            >
+              Bỏ chọn
+            </button>
+            <button
+              type="button"
+              className="detail-primary-action"
+              onClick={handleMergeSelected}
+              disabled={merging || selectedIds.length < 2}
+            >
+              <BriefcaseBusiness size={15} aria-hidden="true" />
+              {merging ? 'Đang gộp hồ sơ...' : `Gộp ${selectedIds.length} cảnh báo thành 1 Case`}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="page-card" aria-busy={loading}>
         {error ? (
@@ -230,6 +291,7 @@ export default function AlertListPage() {
               <table className="data-table" aria-label="Danh sách cảnh báo giao dịch">
                 <thead>
                   <tr>
+                    {role === 'Officer' && <th scope="col" style={{ width: 36 }} aria-label="Chọn gộp" />}
                     <th scope="col">Mã</th>
                     <th scope="col">Khách hàng</th>
                     <th scope="col">Số tiền</th>
@@ -251,6 +313,17 @@ export default function AlertListPage() {
                       onKeyDown={(event) => handleRowKeyDown(event, alert.alertId)}
                       aria-label={`Xem nhanh cảnh báo ${alert.alertId}`}
                     >
+                      {role === 'Officer' && (
+                        <td onClick={(event) => event.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            aria-label={`Chọn cảnh báo ${alert.alertId} để gộp`}
+                            checked={selectedIds.includes(alert.alertId)}
+                            disabled={!isMergeable(alert)}
+                            onChange={() => toggleSelect(alert.alertId)}
+                          />
+                        </td>
+                      )}
                       <td>
                         <Link
                           className="cell-id alert-detail-link"

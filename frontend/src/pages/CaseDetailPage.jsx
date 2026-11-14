@@ -46,6 +46,9 @@ function CaseDetailContent({ id }) {
   const [noteText, setNoteText] = useState('');
   const [proposalAction, setProposalAction] = useState('');
   const [proposalReason, setProposalReason] = useState('');
+  const [candidateAlertsForCase, setCandidateAlertsForCase] = useState({ caseId: null, items: [] });
+  const [selectedAlertToAdd, setSelectedAlertToAdd] = useState('');
+  const candidateAlerts = candidateAlertsForCase.caseId === id ? candidateAlertsForCase.items : [];
 
   useEffect(() => {
     let isActive = true;
@@ -64,6 +67,27 @@ function CaseDetailContent({ id }) {
 
     return () => { isActive = false; };
   }, [id, reloadKey]);
+
+  useEffect(() => {
+    const canAttach = role === 'Officer' &&
+      caseData &&
+      user?.userId != null &&
+      String(caseData.openedBy) === String(user.userId) &&
+      ['Open', 'Investigating', 'Rework'].includes(caseData.status);
+
+    if (!canAttach) return undefined;
+
+    let isActive = true;
+    axiosClient.get(`/Case/${id}/candidate-alerts`)
+      .then((res) => {
+        if (isActive && Array.isArray(res.data)) {
+          setCandidateAlertsForCase({ caseId: id, items: res.data });
+        }
+      })
+      .catch(() => { /* danh sách phụ, bỏ qua nếu lỗi */ });
+
+    return () => { isActive = false; };
+  }, [id, role, user?.userId, caseData]);
 
   const handleRetry = () => {
     setLoading(true);
@@ -195,6 +219,17 @@ function CaseDetailContent({ id }) {
     );
   };
 
+  const handleAddAlertToCase = async (event) => {
+    event.preventDefault();
+    if (!selectedAlertToAdd || busy) return;
+    const ok = await runAction(
+      'add-alert',
+      () => axiosClient.post(`/Case/${id}/alerts`, { alertId: Number(selectedAlertToAdd) }),
+      'Đã gộp thêm cảnh báo vào hồ sơ.'
+    );
+    if (ok) setSelectedAlertToAdd('');
+  };
+
   return (
     <div className="fade-in alert-detail-page">
       <Link className="detail-back-link" to="/cases">
@@ -249,6 +284,36 @@ function CaseDetailContent({ id }) {
                   {alert.riskScore != null && <RiskGauge score={alert.riskScore} level={alert.riskLevel} />}
                 </div>
               ))
+            )}
+            {isOwner && ['Open', 'Investigating', 'Rework'].includes(status) && candidateAlerts.length > 0 && (
+              <form className="case-form" onSubmit={handleAddAlertToCase} style={{ marginTop: 12 }}>
+                <label htmlFor="merge-candidate-alert">
+                  Gộp thêm cảnh báo khác của khách hàng {caseData.customerName} ({candidateAlerts.length} khả dụng)
+                </label>
+                <div className="assign-row">
+                  <select
+                    id="merge-candidate-alert"
+                    className="select-dark"
+                    value={selectedAlertToAdd}
+                    onChange={(e) => setSelectedAlertToAdd(e.target.value)}
+                    disabled={Boolean(busy)}
+                  >
+                    <option value="">— Chọn cảnh báo để gộp —</option>
+                    {candidateAlerts.map((item) => (
+                      <option key={item.alertId} value={item.alertId}>
+                        Cảnh báo #{item.alertId} · {Number(item.amount || 0).toLocaleString('vi-VN')} ₫ · {item.riskLevel}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="submit"
+                    className="detail-primary-action"
+                    disabled={Boolean(busy) || !selectedAlertToAdd}
+                  >
+                    {busy === 'add-alert' ? 'Đang gộp...' : 'Gộp vào hồ sơ'}
+                  </button>
+                </div>
+              </form>
             )}
           </section>
 

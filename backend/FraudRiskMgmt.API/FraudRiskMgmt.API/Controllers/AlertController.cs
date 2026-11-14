@@ -130,7 +130,6 @@ namespace FraudRiskMgmt.API.Controllers
             });
         }
 
-        // (Khôi phục) Chi tiết Alert: trang /alerts/:id và ngăn xem nhanh đều dùng endpoint này
         [HttpGet("{id:int}")]
         [Authorize(Roles = "Officer,Manager")]
         public async Task<IActionResult> GetAlertDetail(int id)
@@ -142,7 +141,6 @@ namespace FraudRiskMgmt.API.Controllers
                 .AsNoTracking()
                 .Where(alert => alert.AlertId == id && alert.DeletedAt == null);
 
-            // Alert do Officer khác phụ trách → trả 404 (giống Case) để không lộ sự tồn tại
             query = ApplyOfficerVisibility(query, userId, role);
 
             var result = await query
@@ -233,8 +231,6 @@ namespace FraudRiskMgmt.API.Controllers
             using var dbTransaction = await _appDbContext.Database.BeginTransactionAsync();
             try
             {
-                // UPDATE có điều kiện chạy như một câu lệnh duy nhất: nếu hai Officer bấm nhận cùng lúc
-                // thì chỉ một người cập nhật được dòng (người kia nhận 0 dòng → 409).
                 var updated = await _appDbContext.Alerts
                     .Where(a => a.AlertId == id
                         && a.DeletedAt == null
@@ -274,16 +270,20 @@ namespace FraudRiskMgmt.API.Controllers
             }
         }
 
+        // Officer tự xử lý trực tiếp Alert đơn lẻ (không tạo Case, không cần Manager duyệt):
+        // - FalsePositive: hệ thống cảnh báo nhầm
+        // - Cleared: đã xác minh an toàn (chỉ áp dụng cho mức Thấp / Trung bình / An toàn)
         [HttpPut("{id}/close")]
         [Authorize(Roles = "Officer")]
         public async Task<IActionResult> CloseAlert(int id, [FromBody] CloseAlertRequest request)
         {
-            var alert = await _appDbContext.Alerts.FindAsync(id);
+            var alert = await _appDbContext.Alerts
+                .FirstOrDefaultAsync(a => a.AlertId == id && a.DeletedAt == null);
             if (alert == null) return this.ApiNotFound("Alert không tồn tại");
 
-            var closableStatuses = new[] { AlertStatuses.Assigned, AlertStatuses.UnderReview };
+            var closableStatuses = new[] { AlertStatuses.Assigned, AlertStatuses.UnderReview, AlertStatuses.Reopened };
             if (!closableStatuses.Contains(alert.Status))
-                return this.ApiConflict($"Alert không thể đóng khi ở trạng thái {alert.Status}");
+                return this.ApiConflict($"Alert không thể xử lý trực tiếp khi ở trạng thái {alert.Status}");
 
             if (alert.CaseId.HasValue)
                 return this.ApiConflict("Alert đã thuộc một Case; hãy xử lý qua Case");
@@ -291,13 +291,23 @@ namespace FraudRiskMgmt.API.Controllers
             var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
             if (alert.AssignedTo != userId) return Forbid();
 
-            if (request.Resolution != "FalsePositive" && request.Resolution != "Escalate")
-                return this.ApiBadRequest("Giải pháp không phù hợp");
+            if (request.Resolution != "FalsePositive" && request.Resolution != "Cleared")
+                return this.ApiBadRequest("Kết luận xử lý không hợp lệ");
+
+            var isHighImpactRisk = string.Equals(alert.RiskLevel, "High", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(alert.RiskLevel, "Critical", StringComparison.OrdinalIgnoreCase);
+
+            if (request.Resolution == "Cleared" && isHighImpactRisk)
+                return this.ApiBadRequest("Cảnh báo mức Cao/Nghiêm trọng không được tự đóng trực tiếp; hãy tạo Hồ sơ điều tra (Case) hoặc chọn Báo động giả nếu hệ thống nhận diện nhầm");
+
+            var note = (request.Note ?? string.Empty).Trim();
+            if (note.Length == 0)
+                return this.ApiBadRequest("Ghi chú xử lý không được để trống");
 
             var oldStatus = alert.Status;
             var newStatus = request.Resolution == "FalsePositive"
                 ? AlertStatuses.FalsePositive
-                : AlertStatuses.AwaitingApproval;
+                : AlertStatuses.Closed;
 
             using var dbTransaction = await _appDbContext.Database.BeginTransactionAsync();
             try
@@ -307,18 +317,20 @@ namespace FraudRiskMgmt.API.Controllers
 
                 await _auditLogService.LogAsync(
                     userId: userId,
-                    action: request.Resolution == "FalsePositive" ? "CloseAlert" : "EscalateAlert",
+                    action: "CloseAlert",
                     entityType: "Alert",
                     entityId: alert.AlertId,
                     oldStatus: oldStatus,
                     newStatus: newStatus,
-                    reason: request.Resolution == "FalsePositive" ? "False Positive" : "Escalated to Manager"
+                    reason: request.Resolution == "FalsePositive"
+                        ? $"Báo động giả: {note}"
+                        : $"Xác minh an toàn ({alert.RiskLevel}): {note}"
                 );
 
                 await dbTransaction.CommitAsync();
                 return Ok(request.Resolution == "FalsePositive"
-                    ? "Alert đã đóng - Cảnh báo giả"
-                    : "Alert đã xử lý - Chờ Manager duyệt");
+                    ? "Đã đóng cảnh báo với kết luận báo động giả"
+                    : "Đã xác minh an toàn và đóng cảnh báo");
             }
             catch (Exception ex)
             {
@@ -327,5 +339,101 @@ namespace FraudRiskMgmt.API.Controllers
                 return this.ApiBadRequest("Không thể xử lý yêu cầu, vui lòng thử lại sau");
             }
         }
+
+        // Manager phê duyệt đóng Alert đơn lẻ do Officer gửi lên (AwaitingApproval -> Closed)
+        //[HttpPut("{id}/approve")]
+        //[Authorize(Roles = "Manager")]
+        //public async Task<IActionResult> ApproveAlert(int id, [FromBody] ManagerProposalDecisionRequest request)
+        //{
+        //    var alert = await _appDbContext.Alerts
+        //        .FirstOrDefaultAsync(a => a.AlertId == id && a.DeletedAt == null);
+        //    if (alert == null) return this.ApiNotFound("Alert không tồn tại");
+
+        //    if (alert.CaseId.HasValue)
+        //        return this.ApiConflict("Alert đã thuộc một Case; hãy phê duyệt qua Case");
+
+        //    if (alert.Status != AlertStatuses.AwaitingApproval)
+        //        return this.ApiConflict($"Alert không ở trạng thái chờ phê duyệt ({alert.Status})");
+
+        //    var decisionNote = (request.DecisionNote ?? string.Empty).Trim();
+        //    if (decisionNote.Length == 0)
+        //        return this.ApiBadRequest("Ghi chú quyết định không được để trống");
+
+        //    var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
+        //    using var dbTransaction = await _appDbContext.Database.BeginTransactionAsync();
+        //    try
+        //    {
+        //        alert.Status = AlertStatuses.Closed;
+        //        await _appDbContext.SaveChangesAsync();
+
+        //        await _auditLogService.LogAsync(
+        //            userId: userId,
+        //            action: "ApproveAlert",
+        //            entityType: "Alert",
+        //            entityId: alert.AlertId,
+        //            oldStatus: AlertStatuses.AwaitingApproval,
+        //            newStatus: AlertStatuses.Closed,
+        //            reason: decisionNote
+        //        );
+
+        //        await dbTransaction.CommitAsync();
+        //        return Ok("Đã phê duyệt và đóng cảnh báo");
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        await dbTransaction.RollbackAsync();
+        //        _logger.LogError(ex, "Lỗi khi approve Alert {AlertId}", id);
+        //        return this.ApiBadRequest("Không thể xử lý yêu cầu, vui lòng thử lại sau");
+        //    }
+        //}
+
+        //// Manager từ chối đóng Alert đơn lẻ và mở lại cho Officer xử lý tiếp (AwaitingApproval -> Reopened)
+        //[HttpPut("{id}/reject")]
+        //[Authorize(Roles = "Manager")]
+        //public async Task<IActionResult> RejectAlert(int id, [FromBody] ManagerProposalDecisionRequest request)
+        //{
+        //    var alert = await _appDbContext.Alerts
+        //        .FirstOrDefaultAsync(a => a.AlertId == id && a.DeletedAt == null);
+        //    if (alert == null) return this.ApiNotFound("Alert không tồn tại");
+
+        //    if (alert.CaseId.HasValue)
+        //        return this.ApiConflict("Alert đã thuộc một Case; hãy xử lý qua Case");
+
+        //    if (alert.Status != AlertStatuses.AwaitingApproval)
+        //        return this.ApiConflict($"Alert không ở trạng thái chờ phê duyệt ({alert.Status})");
+
+        //    var decisionNote = (request.DecisionNote ?? string.Empty).Trim();
+        //    if (decisionNote.Length == 0)
+        //        return this.ApiBadRequest("Ghi chú quyết định không được để trống");
+
+        //    var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
+        //    using var dbTransaction = await _appDbContext.Database.BeginTransactionAsync();
+        //    try
+        //    {
+        //        alert.Status = AlertStatuses.Reopened;
+        //        await _appDbContext.SaveChangesAsync();
+
+        //        await _auditLogService.LogAsync(
+        //            userId: userId,
+        //            action: "RejectAlert",
+        //            entityType: "Alert",
+        //            entityId: alert.AlertId,
+        //            oldStatus: AlertStatuses.AwaitingApproval,
+        //            newStatus: AlertStatuses.Reopened,
+        //            reason: decisionNote
+        //        );
+
+        //        await dbTransaction.CommitAsync();
+        //        return Ok("Đã từ chối đóng và mở lại cảnh báo cho Officer xem xét");
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        await dbTransaction.RollbackAsync();
+        //        _logger.LogError(ex, "Lỗi khi reject Alert {AlertId}", id);
+        //        return this.ApiBadRequest("Không thể xử lý yêu cầu, vui lòng thử lại sau");
+        //    }
+        //}
     }
 }

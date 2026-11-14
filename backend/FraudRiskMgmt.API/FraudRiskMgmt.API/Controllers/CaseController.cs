@@ -18,6 +18,8 @@ namespace FraudRiskMgmt.API.Controllers
         private readonly AppDbContext _appDbContext;
         private readonly AuditLogService _auditLogService;
         private readonly ILogger<CaseController> _logger;
+        public record AddAlertToCaseRequest(int AlertId);
+        public record MergeAlertsRequest(List<int> AlertIds);
 
         public CaseController(
             AppDbContext appDbContext,
@@ -38,6 +40,9 @@ namespace FraudRiskMgmt.API.Controllers
                 .SingleOrDefaultAsync(item => item.AlertId == request.AlertId);
             if (alert == null) return this.ApiNotFound("Alert không tồn tại");
             if (alert.CaseId.HasValue) return this.ApiConflict("Alert đã thuộc một Case khác");
+            if (alert.Status == AlertStatuses.Closed || alert.Status == AlertStatuses.FalsePositive || alert.Status == AlertStatuses.AwaitingApproval)
+                return this.ApiConflict($"Không thể tạo Case khi Alert đang ở trạng thái {alert.Status}");
+
 
             var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
             if (alert.AssignedTo != userId) return Forbid();
@@ -570,6 +575,223 @@ namespace FraudRiskMgmt.API.Controllers
                 _logger.LogError(ex, "Lỗi khi submit Case {CaseId} for approval", id);
                 return this.ApiBadRequest("Không thể xử lý yêu cầu, vui lòng thử lại sau");
             }
+        }
+
+        // Gộp 2 hoặc nhiều Alert của cùng 1 khách hàng thành 1 Case chung
+        [HttpPost("merge")]
+        [Authorize(Roles = "Officer")]
+        public async Task<IActionResult> MergeAlertsIntoCase([FromBody] MergeAlertsRequest request)
+        {
+            var distinctIds = request?.AlertIds?.Distinct().ToList() ?? new List<int>();
+            if (distinctIds.Count < 2)
+                return this.ApiBadRequest("Cần chọn ít nhất 2 cảnh báo để gộp thành một hồ sơ chung");
+
+            var alerts = await _appDbContext.Alerts
+                .Include(a => a.Transaction)
+                .Where(a => distinctIds.Contains(a.AlertId) && a.DeletedAt == null)
+                .ToListAsync();
+
+            if (alerts.Count != distinctIds.Count)
+                return this.ApiNotFound("Một hoặc nhiều cảnh báo không tồn tại");
+
+            var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+            if (alerts.Any(a => a.AssignedTo != userId))
+                return Forbid();
+
+            if (alerts.Any(a => a.CaseId.HasValue))
+                return this.ApiConflict("Có cảnh báo đã thuộc một hồ sơ điều tra khác");
+
+            var allowedStatuses = new[] { AlertStatuses.Assigned, AlertStatuses.UnderReview, AlertStatuses.Reopened };
+            if (alerts.Any(a => !allowedStatuses.Contains(a.Status)))
+                return this.ApiConflict("Chỉ có thể gộp các cảnh báo đang ở trạng thái Đã phân công, Đang xem xét hoặc Mở lại");
+
+            var customerIds = alerts.Select(a => a.Transaction.CustomerId).Distinct().ToList();
+            if (customerIds.Count > 1)
+                return this.ApiBadRequest("Chỉ có thể gộp các cảnh báo của cùng một khách hàng vào chung một hồ sơ");
+
+            using var dbTransaction = await _appDbContext.Database.BeginTransactionAsync();
+            try
+            {
+                var newCase = new Cases
+                {
+                    CustomerId = customerIds[0],
+                    Status = CaseStatuses.Open,
+                    OpenedBy = userId,
+                    CreatedAt = DateTime.UtcNow,
+                };
+
+                _appDbContext.Cases.Add(newCase);
+                foreach (var alert in alerts)
+                {
+                    alert.Case = newCase;
+                    alert.Status = AlertStatuses.UnderReview;
+                }
+
+                await _appDbContext.SaveChangesAsync();
+
+                var joinedIds = string.Join(", ", distinctIds.OrderBy(x => x).Select(x => $"#{x}"));
+                await _auditLogService.LogAsync(
+                    userId: userId,
+                    action: "MergeAlertsToCase",
+                    entityType: "Case",
+                    entityId: newCase.CaseId,
+                    oldStatus: null,
+                    newStatus: CaseStatuses.Open,
+                    reason: $"Gộp {alerts.Count} cảnh báo ({joinedIds}) vào Case #{newCase.CaseId}"
+                );
+
+                await dbTransaction.CommitAsync();
+                return CreatedAtAction(nameof(GetCaseById), new { id = newCase.CaseId }, new
+                {
+                    CaseId = newCase.CaseId,
+                    AlertIds = distinctIds,
+                    Status = newCase.Status
+                });
+            }
+            catch (Exception ex)
+            {
+                await dbTransaction.RollbackAsync();
+                _logger.LogError(ex, "Lỗi khi gộp nhiều Alert vào Case mới");
+                return this.ApiBadRequest("Không thể xử lý yêu cầu, vui lòng thử lại sau");
+            }
+        }
+
+        // Gắn thêm 1 Alert cùng khách hàng vào Case đang mở
+        [HttpPost("{id:int}/alerts")]
+        [Authorize(Roles = "Officer")]
+        public async Task<IActionResult> AddAlertToCase(int id, [FromBody] AddAlertToCaseRequest request)
+        {
+            var caseItem = await _appDbContext.Cases
+                .SingleOrDefaultAsync(c => c.CaseId == id && c.DeletedAt == null);
+            if (caseItem == null) return this.ApiNotFound("Case không tồn tại");
+
+            var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+            if (caseItem.OpenedBy != userId) return Forbid();
+
+            var editableStatuses = new[] { CaseStatuses.Open, CaseStatuses.Investigating, CaseStatuses.Rework };
+            if (!editableStatuses.Contains(caseItem.Status))
+                return this.ApiConflict($"Không thể thêm cảnh báo khi hồ sơ đang ở trạng thái {caseItem.Status}");
+
+            var alert = await _appDbContext.Alerts
+                .Include(a => a.Transaction)
+                .SingleOrDefaultAsync(a => a.AlertId == request.AlertId && a.DeletedAt == null);
+            if (alert == null) return this.ApiNotFound("Alert không tồn tại");
+
+            if (alert.CaseId.HasValue)
+                return this.ApiConflict("Alert này đã thuộc một hồ sơ điều tra khác");
+
+            if (alert.AssignedTo != userId)
+                return Forbid();
+
+            if (alert.Transaction.CustomerId != caseItem.CustomerId)
+                return this.ApiBadRequest("Cảnh báo không thuộc cùng khách hàng với hồ sơ điều tra này");
+
+            var allowedAlertStatuses = new[] { AlertStatuses.Assigned, AlertStatuses.UnderReview, AlertStatuses.Reopened };
+            if (!allowedAlertStatuses.Contains(alert.Status))
+                return this.ApiConflict($"Không thể gộp cảnh báo khi đang ở trạng thái {alert.Status}");
+
+            using var dbTransaction = await _appDbContext.Database.BeginTransactionAsync();
+            try
+            {
+                alert.CaseId = caseItem.CaseId;
+                alert.Status = AlertStatuses.UnderReview;
+                await _appDbContext.SaveChangesAsync();
+
+                await _auditLogService.LogAsync(
+                    userId: userId,
+                    action: "AddAlertToCase",
+                    entityType: "Case",
+                    entityId: caseItem.CaseId,
+                    oldStatus: null,
+                    newStatus: null,
+                    reason: $"Gộp thêm Alert #{alert.AlertId} vào Case #{caseItem.CaseId}"
+                );
+
+                await dbTransaction.CommitAsync();
+                return Ok(new
+                {
+                    Message = $"Đã gộp cảnh báo #{alert.AlertId} vào hồ sơ #{caseItem.CaseId}",
+                    CaseId = caseItem.CaseId,
+                    AlertId = alert.AlertId
+                });
+            }
+            catch (Exception ex)
+            {
+                await dbTransaction.RollbackAsync();
+                _logger.LogError(ex, "Lỗi khi thêm Alert {AlertId} vào Case {CaseId}", request.AlertId, id);
+                return this.ApiBadRequest("Không thể xử lý yêu cầu, vui lòng thử lại sau");
+            }
+        }
+
+        // Lấy danh sách Case đang mở của cùng khách hàng với Alert (gợi ý gộp trên AlertDetailPage)
+        [HttpGet("open-for-alert/{alertId:int}")]
+        [Authorize(Roles = "Officer")]
+        public async Task<IActionResult> GetOpenCasesForAlert(int alertId)
+        {
+            var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+            var customerId = await _appDbContext.Alerts
+                .AsNoTracking()
+                .Where(a => a.AlertId == alertId && a.DeletedAt == null)
+                .Select(a => (int?)a.Transaction.CustomerId)
+                .FirstOrDefaultAsync();
+
+            if (customerId == null) return this.ApiNotFound("Alert không tồn tại");
+
+            var openStatuses = new[] { CaseStatuses.Open, CaseStatuses.Investigating, CaseStatuses.Rework };
+            var openCases = await _appDbContext.Cases
+                .AsNoTracking()
+                .Where(c => c.DeletedAt == null
+                    && c.OpenedBy == userId
+                    && c.CustomerId == customerId.Value
+                    && openStatuses.Contains(c.Status))
+                .OrderByDescending(c => c.CreatedAt)
+                .Select(c => new
+                {
+                    c.CaseId,
+                    c.Status,
+                    c.CreatedAt,
+                    AlertCount = c.Alerts.Count
+                })
+                .ToListAsync();
+
+            return Ok(openCases);
+        }
+
+        // Lấy các Alert khác cùng khách hàng chưa gắn Case để thêm vào Case hiện tại (trên CaseDetailPage)
+        [HttpGet("{id:int}/candidate-alerts")]
+        [Authorize(Roles = "Officer")]
+        public async Task<IActionResult> GetCandidateAlertsForCase(int id)
+        {
+            var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+            var caseInfo = await _appDbContext.Cases
+                .AsNoTracking()
+                .Where(c => c.CaseId == id && c.DeletedAt == null && c.OpenedBy == userId)
+                .Select(c => new { c.CustomerId })
+                .FirstOrDefaultAsync();
+
+            if (caseInfo == null) return this.ApiNotFound("Case không tồn tại");
+
+            var allowedStatuses = new[] { AlertStatuses.Assigned, AlertStatuses.UnderReview, AlertStatuses.Reopened };
+            var candidates = await _appDbContext.Alerts
+                .AsNoTracking()
+                .Where(a => a.DeletedAt == null
+                    && a.CaseId == null
+                    && a.AssignedTo == userId
+                    && a.Transaction.CustomerId == caseInfo.CustomerId
+                    && allowedStatuses.Contains(a.Status))
+                .OrderByDescending(a => a.CreatedAt)
+                .Select(a => new
+                {
+                    a.AlertId,
+                    a.RiskScore,
+                    a.RiskLevel,
+                    a.Status,
+                    Amount = a.Transaction.Amount,
+                    a.CreatedAt
+                })
+                .ToListAsync();
+
+            return Ok(candidates);
         }
     }
 }
