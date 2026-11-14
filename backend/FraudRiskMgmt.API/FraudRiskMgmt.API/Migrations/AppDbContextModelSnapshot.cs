@@ -267,6 +267,10 @@ namespace FraudRiskMgmt.API.Migrations
                     b.Property<DateTime?>("DeletedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("ExternalRef")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<int?>("Hour")
                         .HasColumnType("int");
 
@@ -307,6 +311,10 @@ namespace FraudRiskMgmt.API.Migrations
                     b.HasKey("TransactionId");
 
                     b.HasIndex("CustomerId");
+
+                    b.HasIndex("ExternalRef")
+                        .IsUnique()
+                        .HasFilter("[ExternalRef] IS NOT NULL");
 
                     b.ToTable("Transactions");
                 });

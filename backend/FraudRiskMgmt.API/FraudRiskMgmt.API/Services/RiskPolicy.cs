@@ -1,5 +1,5 @@
 ﻿using Microsoft.Extensions.Options;
-using FraudRiskMgmt.API.Models;   // chỉnh namespace cho đúng nơi RiskLevels đang nằm
+using FraudRiskMgmt.API.Models;
 
 namespace FraudRiskMgmt.API.Services
 {
@@ -25,5 +25,8 @@ namespace FraudRiskMgmt.API.Services
                 ? (large ? RiskLevels.Critical : RiskLevels.High)
                 : (large ? RiskLevels.Medium : RiskLevels.Low);
         }
+
+        public string ClassifyManualReview(double amount)
+            => amount >= _o.LargeAmount ? RiskLevels.High : RiskLevels.Medium;
     }
 }

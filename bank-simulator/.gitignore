@@ -1,0 +1,5 @@
+node_modules
+dist
+.env
+# bản sao tạo tự động bởi npm run sync-data, nguồn gốc nằm ở fraud-detection-ml/data
+public/simulator_source.csv

@@ -1,7 +1,9 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using Microsoft.EntityFrameworkCore;
 
 namespace FraudRiskMgmt.API.Models
 {
+    [Index(nameof(ExternalRef), IsUnique = true)]
     public class Transactions
     {
         public double Amount { get; set; }
@@ -19,6 +21,7 @@ namespace FraudRiskMgmt.API.Models
         public string NameOrig { get; set; } = string.Empty;
         public string NameDest { get; set; } = string.Empty;
         public int? Hour { get; set; }
+        [MaxLength(64)] public string? ExternalRef { get; set; }
         public DateTime? DeletedAt { get; set; } = null;
         public Customer? Customer { get; set; } = null!;
 
