@@ -11,7 +11,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { API_BASE, HAS_KEY, escalateTransaction, sendTransaction, sleep } from './api';
-import { loadSource, nextRef, pickOne, pickStreamRow, rowToPayload } from './data';
+import { buildMergeDemoBatch, loadSource, nextRef, pickOne, pickStreamRow, rowToPayload } from './data';
 import { ManualPanel, ScenarioPanel, StreamPanel } from './panels';
 import LogTable from './LogTable';
 import TransactionDrawer from './TransactionDrawer';
@@ -161,6 +161,38 @@ export default function App() {
     });
   };
 
+  const [batchSending, setBatchSending] = useState(false);
+
+  const sendMergeBatch = async (scenarioKey) => {
+    if (!source || batchSending) return;
+    const items = buildMergeDemoBatch(scenarioKey, source.pools);
+    if (!items.length) return;
+
+    setBatchSending(true);
+    setBanner('');
+    try {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const res = await sendOne(item.payload, {
+          mode: 'Kịch bản gộp',
+          tag: item.tag,
+          groundTruth: item.groundTruth,
+        });
+        if (res.status === 0 || res.status === 401) {
+          setBanner(res.status === 401
+            ? 'API key bị từ chối (401). Kiểm tra VITE_API_KEY trong file .env.'
+            : `Không kết nối được ${API_BASE}. Kiểm tra backend đã chạy chưa.`);
+          break;
+        }
+        if (i < items.length - 1) {
+          await sleep(120);
+        }
+      }
+    } finally {
+      setBatchSending(false);
+    }
+  };
+
   const startStream = async () => {
     if (running.current || !source) return;
     running.current = true;
@@ -306,7 +338,14 @@ const stats = useMemo(() => {
             ))}
           </div>
 
-          {tab === 'scenario' && <ScenarioPanel pools={source?.pools} onSend={sendScenario} />}
+          {tab === 'scenario' && (
+            <ScenarioPanel
+              pools={source?.pools}
+              onSend={sendScenario}
+              onSendBatch={sendMergeBatch}
+              batchSending={batchSending}
+            />
+          )}
           {tab === 'stream' && (
             <StreamPanel
               streaming={streaming}

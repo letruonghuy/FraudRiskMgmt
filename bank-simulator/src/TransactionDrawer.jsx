@@ -77,6 +77,7 @@ export default function TransactionDrawer({ log, onClose, onEscalate, escalating
   if (!log) return null;
 
   const payload = log.payload || {};
+  const displayTime = payload.occurredAt ? new Date(payload.occurredAt) : log.time;
   const src = payload.source || {};
   const dst = payload.destination || {};
   const gt = log.groundTruth;
@@ -117,7 +118,7 @@ export default function TransactionDrawer({ log, onClose, onEscalate, escalating
             <span className="drawer-eyebrow">PHIẾU ĐỐI SOÁT GIAO DỊCH</span>
             <h3>{log.ref}</h3>
             <p className="drawer-sub">
-              {log.time.toLocaleTimeString('vi-VN')} · {log.time.toLocaleDateString('vi-VN')} ·{' '}
+              {displayTime.toLocaleTimeString('vi-VN')} · {displayTime.toLocaleDateString('vi-VN')} ·{' '}
               <strong>{log.type}</strong> · <strong>{money(amount)} VND</strong>
             </p>
           </div>

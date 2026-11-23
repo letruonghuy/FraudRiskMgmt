@@ -154,7 +154,12 @@ export default function LogTable({ logs, hideTags, setHideTags, onClear, onSelec
                   log.state === 'done' &&
                   log.groundTruth?.isFraud &&
                   !(log.body?.alertId || log.manualAlertId);
+
                 const hasAlert = Boolean(log.body?.alertId || log.manualAlertId);
+
+                const displayTime = log.payload?.occurredAt
+                  ? new Date(log.payload.occurredAt)
+                  : log.time;
 
                 return (
                   <tr
@@ -168,9 +173,9 @@ export default function LogTable({ logs, hideTags, setHideTags, onClear, onSelec
                     <td className="c-time">
                       <div className="cell-time">
                         <Clock3 size={12} />
-                        {log.time.toLocaleTimeString('vi-VN')}
+                        {displayTime.toLocaleTimeString('vi-VN')}
                       </div>
-                      <div className="cell-sub">{log.time.toLocaleDateString('vi-VN')}</div>
+                      <div className="cell-sub">{displayTime.toLocaleDateString('vi-VN')}</div>
                     </td>
 
                     <td>

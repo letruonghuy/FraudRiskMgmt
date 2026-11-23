@@ -846,3 +846,17 @@ legend { display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; co
   color: var(--accent);
   transform: translateX(2px);
 }
+/* =========================================================
+   Outlook Time Dropdown & Case Scenario Polish
+   ========================================================= */
+.field [role="listbox"]::-webkit-scrollbar {
+  width: 6px;
+}
+.field [role="listbox"]::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 999px;
+}
+.field [role="option"]:hover {
+  background: var(--panel-3) !important;
+  color: #fff !important;
+}
