@@ -4,12 +4,16 @@ import AlertListPage from './pages/AlertListPage';
 import AlertDetailPage from './pages/AlertDetailPage';
 import CaseListPage from './pages/CaseListPage';
 import DashboardPage from './pages/DashboardPage';
+import ManagerTasksPage from './pages/ManagerTasksPage';
 import NotFoundPage from './pages/NotFoundPage';
 import PrivateRoute from './components/PrivateRoute';
 import MainLayout from './layouts/MainLayout';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { getHomePath } from './contexts/authUtils';
 import CaseDetailPage from './pages/CaseDetailPage';
+import AdminUsersPage from './pages/AdminUsersPage';
+import AdminRiskConfigPage from './pages/AdminRiskConfigPage';
+import AdminAuditLogsPage from './pages/AdminAuditLogsPage';
 
 const ALL_ROLES = ['Officer', 'Manager'];
 
@@ -40,6 +44,10 @@ export default function App() {
           <Route path="/cases/:id" element={<Protected><CaseDetailPage /></Protected>} />
           <Route path="/cases" element={<Protected><CaseListPage /></Protected>} />
           <Route path="/dashboard" element={<Protected roles={['Manager']}><DashboardPage /></Protected>} />
+          <Route path="/dashboard/tasks" element={<Protected roles={['Manager']}><ManagerTasksPage /></Protected>} />
+          <Route path="/admin/users" element={<Protected roles={['Admin']}><AdminUsersPage /></Protected>} />
+          <Route path="/admin/risk-config" element={<Protected roles={['Admin']}><AdminRiskConfigPage /></Protected>} />
+          <Route path="/admin/audit-logs" element={<Protected roles={['Admin']}><AdminAuditLogsPage /></Protected>} />
 
           <Route path="/" element={<HomeRedirect />} />
           <Route path="*" element={<NotFoundPage />} />

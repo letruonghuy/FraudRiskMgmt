@@ -3,7 +3,12 @@
 export const AUTH_KEYS = ['token', 'role', 'fullName', 'userId'];
 
 // Trang chủ theo vai trò
-export const getHomePath = (role) => (role === 'Manager' ? '/dashboard' : '/alerts');
+// export const getHomePath = (role) => (role === 'Manager' ? '/dashboard' : '/alerts');
+export function getHomePath(role) {
+  if (role === 'Admin') return '/admin/users';
+  if (role === 'Manager') return '/dashboard';
+  return '/alerts';
+}
 
 // Chỉ cho phép quay lại đường dẫn nội bộ, tránh open redirect (vd: ?from=//evil.com)
 export const getSafeRedirect = (path) => {

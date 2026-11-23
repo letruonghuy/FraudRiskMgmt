@@ -1,11 +1,35 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, CircleAlert, Clock3, Play, RefreshCw, Send, UserRound } from 'lucide-react';
+import { ArrowLeft, CircleAlert, Clock3, GitMerge, Play, RefreshCw, Send, Unlink, UserRound, X } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import axiosClient from '../api/axiosClient';
 import { useAuth } from '../contexts/AuthContext';
-import { RiskBadge, RiskGauge, StatusBadge, formatDate, getErrorMessage } from './alertShared';
+import { RiskBadge, RiskGauge, formatCurrency, formatDate, getErrorMessage } from './alertShared';
 import { CASE_STATUS_CONFIG, CASE_STATUS_HINT, PROPOSAL_ACTIONS, getActionLabel } from './caseUtils';
 import { CaseStepper, ProposalStatusBadge } from './caseShared';
+
+const MIN_REASON_LENGTH = 5;
+const MAX_REASON_LENGTH = 500;
+
+const MERGE_PATTERN_CONFIG = {
+  SameCustomer: {
+    label: 'Gộp theo cùng khách hàng',
+    color: '#38bdf8',
+    bg: 'rgba(56, 189, 248, 0.12)',
+    border: 'rgba(56, 189, 248, 0.3)',
+  },
+  SameDestination: {
+    label: 'Gộp theo tài khoản nhận chung (Money Mule)',
+    color: '#f59e0b',
+    bg: 'rgba(245, 158, 11, 0.12)',
+    border: 'rgba(245, 158, 11, 0.3)',
+  },
+  MoneyTrail: {
+    label: 'Gộp theo chuỗi dòng tiền (Layering)',
+    color: '#a855f7',
+    bg: 'rgba(168, 85, 247, 0.12)',
+    border: 'rgba(168, 85, 247, 0.3)',
+  },
+};
 
 const extractMessage = (response, fallback) => {
   if (typeof response?.data === 'string' && response.data) return response.data;
@@ -46,9 +70,15 @@ function CaseDetailContent({ id }) {
   const [noteText, setNoteText] = useState('');
   const [proposalAction, setProposalAction] = useState('');
   const [proposalReason, setProposalReason] = useState('');
-  const [candidateAlertsForCase, setCandidateAlertsForCase] = useState({ caseId: null, items: [] });
+
+  // State gộp thêm alert vào Case
+  const [candidateAlerts, setCandidateAlerts] = useState([]);
   const [selectedAlertToAdd, setSelectedAlertToAdd] = useState('');
-  const candidateAlerts = candidateAlertsForCase.caseId === id ? candidateAlertsForCase.items : [];
+  const [addAlertReason, setAddAlertReason] = useState('');
+
+  // State tách (unmerge) alert khỏi Case
+  const [unmergeTarget, setUnmergeTarget] = useState(null);
+  const [unmergeReason, setUnmergeReason] = useState('');
 
   useEffect(() => {
     let isActive = true;
@@ -75,14 +105,15 @@ function CaseDetailContent({ id }) {
       String(caseData.openedBy) === String(user.userId) &&
       ['Open', 'Investigating', 'Rework'].includes(caseData.status);
 
-    if (!canAttach) return undefined;
+    if (!canAttach) {
+      setCandidateAlerts([]);
+      return undefined;
+    }
 
     let isActive = true;
     axiosClient.get(`/Case/${id}/candidate-alerts`)
       .then((res) => {
-        if (isActive && Array.isArray(res.data)) {
-          setCandidateAlertsForCase({ caseId: id, items: res.data });
-        }
+        if (isActive && Array.isArray(res.data)) setCandidateAlerts(res.data);
       })
       .catch(() => { /* danh sách phụ, bỏ qua nếu lỗi */ });
 
@@ -95,7 +126,6 @@ function CaseDetailContent({ id }) {
     setReloadKey((current) => current + 1);
   };
 
-  // Chạy một thao tác ghi dữ liệu, rồi tải lại hồ sơ (không nháy màn hình loading)
   const runAction = async (key, request, fallbackMessage) => {
     if (busy) return false;
     setBusy(key);
@@ -145,31 +175,32 @@ function CaseDetailContent({ id }) {
   const alerts = caseData.alerts ?? [];
   const notes = caseData.notes ?? [];
   const proposals = caseData.proposals ?? [];
-  // Gửi duyệt cần ít nhất một đề xuất ĐANG CHỜ (đề xuất đã bị từ chối không còn tính),
-  // nếu không hồ sơ sẽ kẹt ở "Chờ duyệt" vì Manager không còn gì để quyết định.
+  const patternCfg = MERGE_PATTERN_CONFIG[caseData.mergePattern] || MERGE_PATTERN_CONFIG.SameCustomer;
+  const totalAlertAmount = alerts.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+
   const pendingCount = proposals.filter((p) => p.status === 'Pending').length;
   const approvedCount = proposals.filter((p) => p.status === 'Approved').length;
   const rejectedCount = proposals.filter((p) => p.status === 'Rejected').length;
   const isFinished = status === 'Approved' || status === 'Closed' || status === 'FalsePositive';
 
-  // Nhãn phần đề xuất phản ánh đúng thực tế, không cố định "Chờ Manager quyết định"
   let proposalsEyebrow = 'Đề xuất của điều tra viên';
-    if (proposals.length > 0) {
-      if (pendingCount > 0) {
-        proposalsEyebrow = status === 'PendingApproval'
-          ? `Chờ Manager quyết định (${pendingCount})`
-          : 'Chưa gửi Manager quyết định';
-      } else if (isFinished) {
-        proposalsEyebrow = `Đã quyết định xong · ${approvedCount} duyệt, ${rejectedCount} từ chối`;
-      } else if (rejectedCount > 0) {
-        proposalsEyebrow = `Cần đề xuất mới · ${rejectedCount} đề xuất bị từ chối`;
-      }
+  if (proposals.length > 0) {
+    if (pendingCount > 0) {
+      proposalsEyebrow = status === 'PendingApproval'
+        ? `Chờ Manager quyết định (${pendingCount})`
+        : 'Chưa gửi Manager quyết định';
+    } else if (isFinished) {
+      proposalsEyebrow = `Đã quyết định xong · ${approvedCount} duyệt, ${rejectedCount} từ chối`;
+    } else if (rejectedCount > 0) {
+      proposalsEyebrow = `Cần đề xuất mới · ${rejectedCount} đề xuất bị từ chối`;
     }
+  }
 
   const isOwner = role === 'Officer' && user?.userId != null && String(caseData.openedBy) === String(user.userId);
   const isManager = role === 'Manager';
   const canStart = isOwner && (status === 'Open' || status === 'Rework');
   const canEditInvestigation = isOwner && status === 'Investigating';
+  const canManageAlerts = isOwner && ['Open', 'Investigating', 'Rework'].includes(status);
   const canDecide = isManager && status === 'PendingApproval';
 
   const lastRejection = status === 'Rework'
@@ -221,13 +252,37 @@ function CaseDetailContent({ id }) {
 
   const handleAddAlertToCase = async (event) => {
     event.preventDefault();
-    if (!selectedAlertToAdd || busy) return;
+    const trimmedReason = addAlertReason.trim();
+    if (!selectedAlertToAdd || trimmedReason.length < MIN_REASON_LENGTH || busy) return;
     const ok = await runAction(
       'add-alert',
-      () => axiosClient.post(`/Case/${id}/alerts`, { alertId: Number(selectedAlertToAdd) }),
+      () => axiosClient.post(`/Case/${id}/alerts`, {
+        alertId: Number(selectedAlertToAdd),
+        reason: trimmedReason,
+      }),
       'Đã gộp thêm cảnh báo vào hồ sơ.'
     );
-    if (ok) setSelectedAlertToAdd('');
+    if (ok) {
+      setSelectedAlertToAdd('');
+      setAddAlertReason('');
+    }
+  };
+
+  const handleConfirmUnmerge = async (event) => {
+    event.preventDefault();
+    const trimmedReason = unmergeReason.trim();
+    if (!unmergeTarget || trimmedReason.length < MIN_REASON_LENGTH || busy) return;
+
+    await runAction(
+      'unmerge-alert',
+      () => axiosClient.post(`/Case/${id}/alerts/${unmergeTarget.alertId}/unmerge`, {
+        reason: trimmedReason,
+      }),
+      `Đã tách cảnh báo #${unmergeTarget.alertId} khỏi hồ sơ.`
+    );
+
+    setUnmergeTarget(null);
+    setUnmergeReason('');
   };
 
   return (
@@ -240,7 +295,37 @@ function CaseDetailContent({ id }) {
         <div>
           <p className="detail-eyebrow">Hồ sơ điều tra</p>
           <h1 className="page-title">Hồ sơ #{caseData.caseId}</h1>
-          <p className="page-subtitle">{caseData.customerName} · mở bởi {caseData.openByName}</p>
+          <p className="page-subtitle">
+            Chủ thể chính: {caseData.customerName}
+            {caseData.distinctCustomerCount > 1 && ` · Mạng lưới liên quan: ${caseData.distinctCustomerCount} khách hàng`}
+            {' '}· mở bởi {caseData.openByName}
+          </p>
+          {alerts.length > 1 && (
+            <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '4px 10px',
+                  borderRadius: 999,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: patternCfg.color,
+                  backgroundColor: patternCfg.bg,
+                  border: `1px solid ${patternCfg.border}`,
+                }}
+              >
+                <GitMerge size={13} aria-hidden="true" />
+                {patternCfg.label}
+              </span>
+              {caseData.correlationKey && (
+                <span style={{ fontSize: 12, color: '#94a3b8' }}>
+                  Khóa liên kết: <strong style={{ color: '#e2e8f0', fontFamily: 'monospace' }}>{caseData.correlationKey}</strong>
+                </span>
+              )}
+            </div>
+          )}
         </div>
         <span className="detail-status-badge" style={{ color: statusCfg.color, backgroundColor: statusCfg.bg, borderColor: statusCfg.border }}>
           {statusCfg.label}
@@ -271,44 +356,217 @@ function CaseDetailContent({ id }) {
                 <p className="detail-eyebrow">Nguồn của hồ sơ</p>
                 <h2 id="case-alerts-heading">Cảnh báo liên quan</h2>
               </div>
-              <span className="detail-type-tag">{alerts.length}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {alerts.length > 1 && totalAlertAmount > 0 && (
+                  <span style={{ fontSize: 13, color: '#cbd5e1', fontWeight: 600 }}>
+                    Tổng: {formatCurrency(totalAlertAmount)}
+                  </span>
+                )}
+                <span className="detail-type-tag">{alerts.length}</span>
+              </div>
             </div>
+
             {alerts.length === 0 ? (
               <p className="case-empty">Hồ sơ chưa gắn cảnh báo nào.</p>
             ) : (
-              alerts.map((alert) => (
-                <div className="case-alert-row" key={alert.alertId}>
-                  <Link className="cell-id alert-detail-link" to={`/alerts/${alert.alertId}`}>Cảnh báo #{alert.alertId}</Link>
-                  <StatusBadge status={alert.status} />
-                  {alert.riskLevel && <RiskBadge level={alert.riskLevel} />}
-                  {alert.riskScore != null && <RiskGauge score={alert.riskScore} level={alert.riskLevel} />}
-                </div>
-              ))
-            )}
-            {isOwner && ['Open', 'Investigating', 'Rework'].includes(status) && candidateAlerts.length > 0 && (
-              <form className="case-form" onSubmit={handleAddAlertToCase} style={{ marginTop: 12 }}>
-                <label htmlFor="merge-candidate-alert">
-                  Gộp thêm cảnh báo khác của khách hàng {caseData.customerName} ({candidateAlerts.length} khả dụng)
-                </label>
-                <div className="assign-row">
-                  <select
-                    id="merge-candidate-alert"
-                    className="select-dark"
-                    value={selectedAlertToAdd}
-                    onChange={(e) => setSelectedAlertToAdd(e.target.value)}
-                    disabled={Boolean(busy)}
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 10,
+                  maxHeight: alerts.length > 4 ? 430 : 'none',
+                  overflowY: alerts.length > 4 ? 'auto' : 'visible',
+                  paddingRight: alerts.length > 4 ? 4 : 0,
+                }}
+              >
+                {alerts.map((alert) => (
+                  <div
+                    key={alert.alertId}
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 10,
+                      padding: '12px 14px',
+                      borderRadius: 10,
+                      backgroundColor: 'rgba(15, 23, 42, 0.45)',
+                      border: '1px solid rgba(148, 163, 184, 0.14)',
+                    }}
                   >
-                    <option value="">— Chọn cảnh báo để gộp —</option>
-                    {candidateAlerts.map((item) => (
-                      <option key={item.alertId} value={item.alertId}>
-                        Cảnh báo #{item.alertId} · {Number(item.amount || 0).toLocaleString('vi-VN')} ₫ · {item.riskLevel}
-                      </option>
-                    ))}
-                  </select>
+                    {/* Hàng 1: Định danh bên trái — Số tiền & Nút tách bên phải */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 12,
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <Link
+                          className="cell-id alert-detail-link"
+                          to={`/alerts/${alert.alertId}`}
+                          style={{ fontWeight: 700 }}
+                        >
+                          Cảnh báo #{alert.alertId}
+                        </Link>
+                        {alert.customerName && (
+                          <>
+                            <span style={{ color: '#475569' }}>•</span>
+                            <span style={{ fontSize: 13.5, fontWeight: 500, color: '#e2e8f0' }}>
+                              {alert.customerName}
+                            </span>
+                          </>
+                        )}
+                        {alert.transactionTime && (
+                          <span style={{ fontSize: 12, color: '#64748b', fontVariantNumeric: 'tabular-nums' }}>
+                            ({formatDate(alert.transactionTime)})
+                          </span>
+                        )}
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        {alert.amount > 0 && (
+                          <span
+                            style={{
+                              fontSize: 14,
+                              fontWeight: 700,
+                              color: '#f8fafc',
+                              fontVariantNumeric: 'tabular-nums',
+                            }}
+                          >
+                            {formatCurrency(alert.amount)}
+                          </span>
+                        )}
+
+                        {canManageAlerts && alerts.length > 1 && (
+                          <button
+                            type="button"
+                            className="sort-toggle"
+                            disabled={Boolean(busy)}
+                            onClick={() => {
+                              setUnmergeTarget(alert);
+                              setUnmergeReason('');
+                            }}
+                            title="Tách cảnh báo này khỏi hồ sơ"
+                            style={{ padding: '4px 8px', fontSize: 12, color: '#fca5a5' }}
+                          >
+                            <Unlink size={13} aria-hidden="true" /> Tách
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Đường phân cách nhẹ */}
+                    <div style={{ height: 1, backgroundColor: 'rgba(148, 163, 184, 0.08)' }} />
+
+                    {/* Hàng 2: Luồng tài khoản cỡ lớn hơn — Mức độ & Điểm rủi ro bên phải */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '8px 12px',
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      {(alert.nameOrig || alert.nameDest) ? (
+                        <div
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            flexWrap: 'wrap',
+                            fontSize: 13.5,
+                          }}
+                        >
+                          <span
+                            style={{
+                              padding: '4px 10px',
+                              borderRadius: 6,
+                              backgroundColor: 'rgba(30, 41, 59, 0.9)',
+                              border: '1px solid rgba(148, 163, 184, 0.18)',
+                              color: '#e2e8f0',
+                              fontFamily: 'monospace',
+                              fontWeight: 500,
+                            }}
+                          >
+                            <span style={{ color: '#94a3b8', fontFamily: 'inherit', fontWeight: 400 }}>Nguồn: </span>
+                            {alert.nameOrig || '?'}
+                          </span>
+                          <span style={{ color: '#94a3b8', fontWeight: 700, fontSize: 14 }}>→</span>
+                          <span
+                            style={{
+                              padding: '4px 10px',
+                              borderRadius: 6,
+                              backgroundColor: 'rgba(30, 41, 59, 0.9)',
+                              border: '1px solid rgba(148, 163, 184, 0.18)',
+                              color: '#e2e8f0',
+                              fontFamily: 'monospace',
+                              fontWeight: 500,
+                            }}
+                          >
+                            <span style={{ color: '#94a3b8', fontFamily: 'inherit', fontWeight: 400 }}>Đích: </span>
+                            {alert.nameDest || '?'}
+                          </span>
+                        </div>
+                      ) : (
+                        <span />
+                      )}
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0, marginLeft: 'auto' }}>
+                        {alert.riskLevel && <RiskBadge level={alert.riskLevel} />}
+                        {alert.riskScore != null && <RiskGauge score={alert.riskScore} level={alert.riskLevel} />}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {canManageAlerts && candidateAlerts.length > 0 && (
+              <form className="case-form" onSubmit={handleAddAlertToCase} style={{ marginTop: 14 }}>
+                <label htmlFor="merge-candidate-alert">
+                  Gộp thêm cảnh báo liên quan ({candidateAlerts.length} khả dụng)
+                </label>
+                <select
+                  id="merge-candidate-alert"
+                  className="select-dark"
+                  style={{ width: '100%' }}
+                  value={selectedAlertToAdd}
+                  onChange={(e) => setSelectedAlertToAdd(e.target.value)}
+                  disabled={Boolean(busy)}
+                >
+                  <option value="">— Chọn cảnh báo để gộp —</option>
+                  {candidateAlerts.map((item) => (
+                    <option key={item.alertId} value={item.alertId}>
+                      #{item.alertId} · {item.customerName} · {Number(item.amount || 0).toLocaleString('vi-VN')} ₫ · {item.matchReason}
+                    </option>
+                  ))}
+                </select>
+
+                {selectedAlertToAdd && (
+                  <>
+                    <label htmlFor="add-alert-reason">
+                      Lý do gộp thêm vào hồ sơ (bắt buộc, {MIN_REASON_LENGTH}–{MAX_REASON_LENGTH} ký tự)
+                    </label>
+                    <textarea
+                      id="add-alert-reason"
+                      rows={2}
+                      maxLength={MAX_REASON_LENGTH}
+                      placeholder="Ví dụ: Giao dịch cùng tài khoản nhận trong chuỗi tẩu tán đang điều tra..."
+                      value={addAlertReason}
+                      onChange={(e) => setAddAlertReason(e.target.value)}
+                      disabled={Boolean(busy)}
+                    />
+                  </>
+                )}
+
+                <div className="case-form-actions">
                   <button
                     type="submit"
                     className="detail-primary-action"
-                    disabled={Boolean(busy) || !selectedAlertToAdd}
+                    disabled={Boolean(busy) || !selectedAlertToAdd || addAlertReason.trim().length < MIN_REASON_LENGTH}
                   >
                     {busy === 'add-alert' ? 'Đang gộp...' : 'Gộp vào hồ sơ'}
                   </button>
@@ -354,12 +612,6 @@ function CaseDetailContent({ id }) {
               </ul>
             )}
 
-            {/* {isFinished && rejectedCount > 0 && (
-              <p className="case-message warn" role="status">
-                Hồ sơ đã hoàn tất dù có {rejectedCount} đề xuất từng bị từ chối. Đề xuất bị từ chối đã được điều tra viên
-                làm lại hoặc thay thế trong lần gửi duyệt sau; chỉ {approvedCount} đề xuất được duyệt có hiệu lực.
-              </p>
-            )} */}
             {isFinished && rejectedCount > 0 && (
               <p className="case-message info" role="status">
                 Hồ sơ hoàn tất với {approvedCount} đề xuất được duyệt có hiệu lực. Không được thực hiện:{' '}
@@ -497,11 +749,100 @@ function CaseDetailContent({ id }) {
           </section>
         </aside>
       </div>
+
+      {/* Modal xác nhận tách cảnh báo khỏi hồ sơ */}
+      {unmergeTarget && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="unmerge-modal-title"
+          onClick={() => { if (!busy) setUnmergeTarget(null); }}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1000,
+            backgroundColor: 'rgba(2, 6, 23, 0.78)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+          }}
+        >
+          <div
+            onClick={(event) => event.stopPropagation()}
+            style={{
+              width: '100%',
+              maxWidth: 480,
+              backgroundColor: '#0f172a',
+              border: '1px solid rgba(148, 163, 184, 0.24)',
+              borderRadius: 14,
+              padding: 20,
+              boxShadow: '0 24px 60px rgba(0, 0, 0, 0.55)',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+              <div>
+                <p className="detail-eyebrow">Điều chỉnh phạm vi hồ sơ</p>
+                <h2 id="unmerge-modal-title" style={{ margin: '4px 0 0', fontSize: 18, color: '#f8fafc' }}>
+                  Tách Cảnh báo #{unmergeTarget.alertId} khỏi hồ sơ
+                </h2>
+              </div>
+              <button
+                type="button"
+                className="sort-toggle"
+                onClick={() => setUnmergeTarget(null)}
+                disabled={Boolean(busy)}
+                aria-label="Đóng"
+                style={{ padding: '6px 8px' }}
+              >
+                <X size={16} aria-hidden="true" />
+              </button>
+            </div>
+
+            <p style={{ marginTop: 10, fontSize: 13.5, color: '#cbd5e1', lineHeight: 1.5 }}>
+              Cảnh báo <strong>#{unmergeTarget.alertId}</strong> ({unmergeTarget.customerName} · {formatCurrency(unmergeTarget.amount)}) sẽ được gỡ khỏi Hồ sơ #{caseData.caseId} và trả về trạng thái <strong>Đã phân công (Assigned)</strong>.
+            </p>
+
+            <form className="case-form" onSubmit={handleConfirmUnmerge} style={{ marginTop: 12 }}>
+              <label htmlFor="unmerge-reason">
+                Lý do tách cảnh báo (bắt buộc, {MIN_REASON_LENGTH}–{MAX_REASON_LENGTH} ký tự)
+              </label>
+              <textarea
+                id="unmerge-reason"
+                rows={3}
+                maxLength={MAX_REASON_LENGTH}
+                placeholder="Ví dụ: Giao dịch này đã xác minh là thanh toán định kỳ hợp lệ, không thuộc chuỗi gian lận đang điều tra..."
+                value={unmergeReason}
+                onChange={(e) => setUnmergeReason(e.target.value)}
+                disabled={Boolean(busy)}
+                required
+              />
+              <div className="case-form-actions" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
+                <button
+                  type="button"
+                  className="sort-toggle"
+                  onClick={() => setUnmergeTarget(null)}
+                  disabled={Boolean(busy)}
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  className="detail-danger-action"
+                  disabled={Boolean(busy) || unmergeReason.trim().length < MIN_REASON_LENGTH}
+                >
+                  <Unlink size={14} aria-hidden="true" />
+                  {busy === 'unmerge-alert' ? 'Đang tách...' : 'Xác nhận tách cảnh báo'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-// key={id}: đổi sang hồ sơ khác thì toàn bộ state (form, thông báo...) được tạo mới
 export default function CaseDetailPage() {
   const { id } = useParams();
   return <CaseDetailContent key={id} id={id} />;

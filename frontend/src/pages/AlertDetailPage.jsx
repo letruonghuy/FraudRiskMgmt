@@ -23,6 +23,7 @@ const STEP_INDEX = {
   New: 0, Assigned: 1, UnderReview: 2, Reopened: 2, AwaitingApproval: 3, Closed: 4, FalsePositive: 4,
 };
 
+
 function WorkflowStepper({ status }) {
   const current = STEP_INDEX[status] ?? 0;
   const isFalsePositive = status === 'FalsePositive';
@@ -135,10 +136,11 @@ export default function AlertDetailPage() {
   const [resolution, setResolution] = useState('FalsePositive');
   const [closeNote, setCloseNote] = useState('');
 
-  // State gợi ý gộp vào Case đang mở của cùng khách hàng
-  const [openCasesForAlert, setOpenCasesForAlert] = useState({ alertId: null, items: [] });
+  // State gợi ý gộp vào Case đang mở (SameCustomer | SameDestination | MoneyTrail)
+ // State gợi ý gộp vào Case đang mở
+  const [openCases, setOpenCases] = useState([]);
   const [targetCaseId, setTargetCaseId] = useState('');
-  const openCases = openCasesForAlert.alertId === alert?.alertId ? openCasesForAlert.items : [];
+  const [mergeReason, setMergeReason] = useState('');
 
   useEffect(() => {
     let isActive = true;
@@ -169,13 +171,17 @@ export default function AlertDetailPage() {
       String(alert.assignedTo) === String(user.userId) &&
       !['Closed', 'FalsePositive', 'AwaitingApproval'].includes(alert.status);
 
-    if (!canCheckOpenCases) return undefined;
+    if (!canCheckOpenCases) {
+      setOpenCases([]);
+      setTargetCaseId('');
+      return undefined;
+    }
 
     let isActive = true;
     axiosClient.get(`/Case/open-for-alert/${alert.alertId}`)
       .then((res) => {
         if (!isActive || !Array.isArray(res.data)) return;
-        setOpenCasesForAlert({ alertId: alert.alertId, items: res.data });
+        setOpenCases(res.data);
         setTargetCaseId(res.data[0] ? String(res.data[0].caseId) : '');
       })
       .catch(() => { /* bỏ qua nếu không tải được gợi ý */ });
@@ -249,13 +255,17 @@ export default function AlertDetailPage() {
   };
 
   const handleMergeIntoExistingCase = async () => {
-    if (!alert || !targetCaseId || busy) return;
+    const trimmedReason = mergeReason.trim();
+    if (!alert || !targetCaseId || busy || trimmedReason.length < 5) return;
 
     setBusy('merge');
     setActionError('');
     setActionSuccess('');
     try {
-      await axiosClient.post(`/Case/${targetCaseId}/alerts`, { alertId: alert.alertId });
+      await axiosClient.post(`/Case/${targetCaseId}/alerts`, {
+        alertId: alert.alertId,
+        reason: trimmedReason,
+      });
       navigate(`/cases/${targetCaseId}`);
     } catch (requestError) {
       setActionError(getErrorMessage(requestError));
@@ -465,10 +475,10 @@ export default function AlertDetailPage() {
                     <select
                       id="alert-resolution"
                       className="select-dark"
+                      style={{ width: '100%' }}
                       value={effectiveResolution}
                       onChange={(e) => setResolution(e.target.value)}
                       disabled={Boolean(busy)}
-                      style={{ width: '100%' }}
                     >
                       <option value="FalsePositive">Báo động giả (Hệ thống nhận diện nhầm)</option>
                       {!isHighImpactRisk && (
@@ -507,32 +517,47 @@ export default function AlertDetailPage() {
                 <div className="detail-action-area">
                   {openCases.length > 0 && (
                     <div className="assign-panel" style={{ marginBottom: 10 }}>
-                      <p className="assign-title">Khách hàng đang có hồ sơ mở</p>
+                      <p className="assign-title">Có hồ sơ điều tra liên quan đang mở</p>
                       <p className="assign-hint">
                         Gộp cảnh báo này vào hồ sơ đang điều tra để xử lý chung thay vì mở hồ sơ mới:
                       </p>
-                      <div className="assign-row">
+                      <div className="case-form" style={{ marginTop: 8 }}>
                         <select
                           aria-label="Chọn hồ sơ đang mở"
                           className="select-dark"
+                          style={{ width: '100%' }}
                           value={targetCaseId}
                           onChange={(e) => setTargetCaseId(e.target.value)}
                           disabled={Boolean(busy)}
                         >
                           {openCases.map((c) => (
                             <option key={c.caseId} value={c.caseId}>
-                              Hồ sơ #{c.caseId} ({c.alertCount} cảnh báo · {c.status})
+                              Hồ sơ #{c.caseId} · {c.matchReason || c.status} ({c.alertCount} cảnh báo)
                             </option>
                           ))}
                         </select>
-                        <button
-                          className="detail-primary-action"
-                          type="button"
-                          onClick={handleMergeIntoExistingCase}
-                          disabled={Boolean(busy) || !targetCaseId}
-                        >
-                          {busy === 'merge' ? 'Đang gộp...' : 'Gộp vào hồ sơ'}
-                        </button>
+
+                        <label htmlFor="alert-detail-merge-reason">Lý do gộp vào hồ sơ (bắt buộc, 5–500 ký tự)</label>
+                        <textarea
+                          id="alert-detail-merge-reason"
+                          rows={2}
+                          maxLength={500}
+                          placeholder="Ví dụ: Giao dịch phát sinh tiếp theo của cùng đối tượng đang điều tra..."
+                          value={mergeReason}
+                          onChange={(e) => setMergeReason(e.target.value)}
+                          disabled={Boolean(busy)}
+                        />
+
+                        <div className="case-form-actions">
+                          <button
+                            className="detail-primary-action"
+                            type="button"
+                            onClick={handleMergeIntoExistingCase}
+                            disabled={Boolean(busy) || !targetCaseId || mergeReason.trim().length < 5}
+                          >
+                            {busy === 'merge' ? 'Đang gộp...' : 'Gộp vào hồ sơ'}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   )}

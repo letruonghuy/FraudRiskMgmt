@@ -1,11 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Activity, ArrowLeftRight, CircleAlert, Clock3, FolderOpen, RefreshCw, ShieldAlert, ShieldCheck, UserRoundCheck } from 'lucide-react';
+import {
+  Activity, ArrowLeftRight, CircleAlert, Clock3,
+  FolderOpen, ShieldAlert, ShieldCheck, UserRoundCheck,
+} from 'lucide-react';
 import axiosClient from '../api/axiosClient';
 import { RISK_CONFIG, STATUS_CONFIG, getErrorMessage } from './alertShared';
 import { ML_MODEL_INFO } from './mlExplain';
 import { CASE_STATUS_CONFIG } from './caseUtils';
-
 
 const RISK_ORDER = ['Critical', 'High', 'Medium', 'Low', 'Safe'];
 const STATUS_ORDER = ['New', 'Assigned', 'UnderReview', 'AwaitingApproval', 'Reopened', 'Closed', 'FalsePositive'];
@@ -17,13 +19,11 @@ const PRESETS = [
   { label: '1 năm', days: 365 },
 ];
 
-// Dưới ngưỡng này tỷ lệ báo động giả chưa đủ tin cậy nên không hiển thị
+const POLL_INTERVAL_MS = 5000;
 const MIN_RESOLVED_FOR_RATE = 10;
-// Ít hồ sơ thì tỷ lệ hoàn thành dễ gây hiểu nhầm (ví dụ 0/1 = 0%) nên chỉ hiển thị khi đủ mẫu
 const MIN_CASES_FOR_RATE = 5;
+
 const formatNumber = (value) => Number(value || 0).toLocaleString('vi-VN');
-// API trả tỷ lệ báo động giả đã nhân 100 (ví dụ 25.5)
-// API trả số phút xử lý trung bình (null nếu chưa có hồ sơ nào đóng trong khoảng đã chọn)
 const formatDuration = (minutes) => {
   if (minutes == null) return '—';
   const total = Math.round(minutes);
@@ -36,7 +36,6 @@ const formatDuration = (minutes) => {
 };
 const formatPercent = (value) => (value == null ? '—' : `${Number(value).toLocaleString('vi-VN', { maximumFractionDigits: 1 })}%`);
 
-// yyyy-MM-dd theo giờ địa phương (input type="date" dùng định dạng này)
 const toInputDate = (date) => {
   const pad = (n) => String(n).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
@@ -49,7 +48,6 @@ const rangeForDays = (days) => {
 };
 const daysBetween = (from, to) => Math.round((new Date(to) - new Date(from)) / 86400000) + 1;
 
-// Điền 0 cho các ngày không có giao dịch để biểu đồ không bị đứt quãng
 function fillDaily(items, from, to) {
   const perDay = new Map();
   (items || []).forEach((item) => {
@@ -80,9 +78,8 @@ function StatTile({ icon, label, value, hint, tone, compact }) {
   );
 }
 
-// Thanh ngang: nhãn bên trái, giá trị bên phải; một chiều dữ liệu, màu theo ngữ nghĩa có sẵn của hệ thống
 function BarList({ rows, emptyText }) {
-const max = Math.max(5, ...rows.map((r) => r.count));
+  const max = Math.max(5, ...rows.map((r) => r.count));
   if (rows.every((r) => r.count === 0)) return <p className="case-empty">{emptyText}</p>;
   return (
     <ul className="bar-list">
@@ -99,15 +96,12 @@ const max = Math.max(5, ...rows.map((r) => r.count));
   );
 }
 
-
 const CHART_HEIGHT = 220;
 const MARGIN = { top: 12, right: 16, bottom: 28, left: 44 };
 
-// yyyy-MM-dd -> dd/MM và dd/MM/yyyy (an toàn khi chuỗi rỗng)
 const formatDay = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}` : '');
 const formatFullDay = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '');
 
-// Bước chia trục tung "tròn" (1, 2, 5, 10, 20, 50...) sao cho 5 khoảng phủ hết giá trị lớn nhất
 function niceStep(max) {
   const raw = Math.max(1, max / 5);
   const pow = 10 ** Math.floor(Math.log10(raw));
@@ -116,7 +110,6 @@ function niceStep(max) {
   return nice * pow;
 }
 
-// Khoảng dài thì gộp theo tuần (7 ngày một cột) để cột đủ rộng và đọc được
 function toBuckets(data, weekly) {
   if (!weekly) return data.map((d) => ({ start: d.date, end: d.date, count: d.count }));
   const result = [];
@@ -131,7 +124,6 @@ function toBuckets(data, weekly) {
   return result;
 }
 
-// Biểu đồ cột theo ngày (SVG tự đo bề rộng khung chứa, một màu)
 function DailyChart({ data }) {
   const wrapRef = useRef(null);
   const [width, setWidth] = useState(0);
@@ -209,28 +201,69 @@ export default function DashboardPage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [reloadKey, setReloadKey] = useState(0);
+
+  const requestSeqRef = useRef(0);
+  const inFlightRef = useRef(false);
 
   const rangeValid = Boolean(range.from && range.to && range.from <= range.to);
 
-  useEffect(() => {
-    if (!rangeValid) return undefined;
-    let isActive = true;
-    const load = async () => {
+  const fetchDashboard = useCallback(async ({ silent = false } = {}) => {
+    if (!rangeValid) return;
+    if (silent && inFlightRef.current) return;
+
+    const seq = ++requestSeqRef.current;
+    inFlightRef.current = true;
+    if (!silent) {
       setLoading(true);
       setError('');
-      try {
-        const response = await axiosClient.get('/Dashboard', { params: { from: range.from, to: range.to } });
-        if (isActive) setData(response.data);
-      } catch (requestError) {
-        if (isActive) setError(getErrorMessage(requestError));
-      } finally {
-        if (isActive) setLoading(false);
+    }
+
+    try {
+      const response = await axiosClient.get('/Dashboard', {
+        params: { from: range.from, to: range.to },
+      });
+      if (seq === requestSeqRef.current) {
+        setData(response.data);
+        setError('');
+      }
+    } catch (requestError) {
+      if (seq === requestSeqRef.current && !silent) {
+        setError(getErrorMessage(requestError));
+      }
+    } finally {
+      inFlightRef.current = false;
+      if (seq === requestSeqRef.current && !silent) {
+        setLoading(false);
+      }
+    }
+  }, [range.from, range.to, rangeValid]);
+
+  useEffect(() => {
+    fetchDashboard({ silent: false });
+  }, [fetchDashboard]);
+
+  // Tự động cập nhật ngầm mỗi 5 giây khi tab đang mở
+  useEffect(() => {
+    if (!rangeValid) return undefined;
+
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        fetchDashboard({ silent: true });
+      }
+    }, POLL_INTERVAL_MS);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchDashboard({ silent: true });
       }
     };
-    load();
-    return () => { isActive = false; };
-  }, [range.from, range.to, rangeValid, reloadKey]);
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [rangeValid, fetchDashboard]);
 
   if (loading && !data) {
     return (
@@ -247,11 +280,6 @@ export default function DashboardPage() {
         <CircleAlert size={28} aria-hidden="true" />
         <h1>Không tải được số liệu</h1>
         <p>{error}</p>
-        <div className="alert-detail-state-actions">
-          <button className="sort-toggle" type="button" onClick={() => setReloadKey((k) => k + 1)}>
-            <RefreshCw size={15} aria-hidden="true" /> Thử lại
-          </button>
-        </div>
       </div>
     );
   }
@@ -268,7 +296,6 @@ export default function DashboardPage() {
   }));
 
   const totalAlerts = (data.alertByStatus || []).reduce((sum, x) => sum + x.count, 0);
-  // API trả 0 khi chưa có cảnh báo nào xử lý xong → tự suy ra để không hiện "0%" gây hiểu nhầm
   const resolvedAlerts = countOf(data.alertByStatus, 'status', 'Closed') + countOf(data.alertByStatus, 'status', 'FalsePositive');
   const enoughData = resolvedAlerts >= MIN_RESOLVED_FOR_RATE;
   const falsePositiveRate = enoughData ? data.falsePositiveRate : null;
@@ -305,9 +332,6 @@ export default function DashboardPage() {
             <input type="date" className="select-dark" value={range.to} min={range.from || undefined}
               onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))} />
           </label>
-          <button className="sort-toggle" type="button" onClick={() => setReloadKey((k) => k + 1)} disabled={loading || !rangeValid}>
-            <RefreshCw size={15} aria-hidden="true" /> Tải lại
-          </button>
         </div>
       </header>
 
@@ -357,12 +381,12 @@ export default function DashboardPage() {
               <table className="detail-balance-table">
                 <thead>
                   <tr>
-                  <th scope="col">Điều tra viên</th>
-                  <th scope="col">Hồ sơ</th>
-                  <th scope="col">Chưa xong</th>
-                  <th scope="col">Đã xong</th>
-                  {showRate && <th scope="col">Tỷ lệ xong</th>}
-                </tr>
+                    <th scope="col">Điều tra viên</th>
+                    <th scope="col">Hồ sơ</th>
+                    <th scope="col">Chưa xong</th>
+                    <th scope="col">Đã xong</th>
+                    {showRate && <th scope="col">Tỷ lệ xong</th>}
+                  </tr>
                 </thead>
                 <tbody>
                   {officers.map((o) => (
@@ -393,24 +417,34 @@ export default function DashboardPage() {
 
         <section className="detail-section dash-wide" aria-labelledby="dash-model">
           <div className="detail-section-heading">
-            <div><p className="detail-eyebrow">Mô hình học máy</p><h2 id="dash-model">{ML_MODEL_INFO.name}</h2></div>
+            <div>
+              <p className="detail-eyebrow">Mô hình học máy</p>
+              <h2 id="dash-model">{ML_MODEL_INFO.name}</h2>
+            </div>
+            <span className="detail-type-tag" style={{ color: '#86efac', background: 'rgba(34, 197, 94, 0.1)', borderColor: 'rgba(34, 197, 94, 0.25)' }}>
+              Đang hoạt động
+            </span>
           </div>
-          <dl className="alert-detail-fields">
-            <div className="alert-detail-field"><dt>Ngưỡng tạo cảnh báo</dt><dd>{formatPercent(ML_MODEL_INFO.alertThreshold * 100)}</dd></div>
-            <div className="alert-detail-field"><dt>Ngưỡng xác định gian lận</dt><dd>{formatPercent(ML_MODEL_INFO.threshold * 100)}</dd></div>
-            <div className="alert-detail-field"><dt>Precision (kiểm thử)</dt><dd>{formatPercent(ML_MODEL_INFO.precision * 100)}</dd></div>
-            <div className="alert-detail-field"><dt>Recall (kiểm thử)</dt><dd>{formatPercent(ML_MODEL_INFO.recall * 100)}</dd></div>
-            <div className="alert-detail-field"><dt>Precision thực tế</dt><dd>{formatPercent(realPrecision)}</dd></div>
-            <div className="alert-detail-field"><dt>Cảnh báo đã xử lý</dt><dd>{formatNumber(resolvedAlerts)} (cần ≥ {MIN_RESOLVED_FOR_RATE} để tính)</dd></div>
+          <dl className="alert-detail-fields" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
+            <div className="alert-detail-field">
+              <dt>Precision thực tế</dt>
+              <dd>{formatPercent(realPrecision)}</dd>
+            </div>
+            <div className="alert-detail-field">
+              <dt>Tỷ lệ báo động giả</dt>
+              <dd>{formatPercent(falsePositiveRate)}</dd>
+            </div>
+            <div className="alert-detail-field">
+              <dt>Cảnh báo đã xử lý</dt>
+              <dd>{formatNumber(resolvedAlerts)} (cần ≥ {MIN_RESOLVED_FOR_RATE} để tính)</dd>
+            </div>
           </dl>
-          <p className="case-empty ml-note">
-            Chỉ số kiểm thử đo trên tập dữ liệu offline; “precision thực tế” = 100% − tỷ lệ báo động giả của các cảnh báo đã xử lý.
-            Hai số lệch nhau nhiều là tín hiệu để xem xét huấn luyện lại mô hình.
-          </p>
         </section>
       </div>
 
-      <p className="case-empty"><Link className="detail-back-link" to="/alerts">Xem danh sách cảnh báo →</Link></p>
+      <p className="case-empty">
+        <Link className="detail-back-link" to="/dashboard/tasks">Chuyển sang xử lý công việc tồn đọng →</Link>
+      </p>
     </div>
   );
 }
