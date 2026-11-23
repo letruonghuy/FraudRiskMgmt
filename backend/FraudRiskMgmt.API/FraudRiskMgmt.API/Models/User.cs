@@ -10,7 +10,9 @@ namespace FraudRiskMgmt.API.Models
         public string Email { get; set; } = string.Empty;
         public string PasswordHash { get; set; } = string.Empty;
         public UserRole Role { get; set; } = UserRole.Officer;
+        public bool IsActive { get; set; } = true;
         public DateTime CreatedAt { get; set; }
+        public DateTime? LastLoginAt { get; set; }
         public DateTime? DeletedAt { get; set; }
     }
 }

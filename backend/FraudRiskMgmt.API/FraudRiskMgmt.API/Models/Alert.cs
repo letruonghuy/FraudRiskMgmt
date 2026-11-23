@@ -21,6 +21,9 @@ namespace FraudRiskMgmt.API.Models
         [ForeignKey("AssignedTo")]
         public User? AssignedToUser { get; set; }
         public DateTime? DeletedAt { get; set; } = null;
+
+        [Timestamp]
+        public byte[]? RowVersion { get; set; }
     }
 
 }

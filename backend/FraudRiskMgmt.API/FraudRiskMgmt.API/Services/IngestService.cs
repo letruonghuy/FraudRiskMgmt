@@ -37,6 +37,8 @@ namespace FraudRiskMgmt.API.Services
             var hour = req.Hour ?? occurredAt.AddHours(7).Hour;   // giờ Việt Nam nếu bên gửi không cung cấp
             var src = req.Source;
             var dst = req.Destination;
+            var origAcc = src.AccountNumber.Trim().ToUpperInvariant();
+            var destAcc = dst.AccountNumber.Trim().ToUpperInvariant();
 
             // Cùng công thức với notebook huấn luyện (dấu quan trọng)
             var errOrig = src.BalanceBefore - src.BalanceAfter - req.Amount;
@@ -52,8 +54,8 @@ namespace FraudRiskMgmt.API.Services
                     {
                         CustomerId = 0,
                         TransactionType = req.Type,
-                        NameOrig = src.AccountNumber,
-                        NameDest = dst.AccountNumber,
+                        NameOrig = origAcc,
+                        NameDest = destAcc,
                         Amount = req.Amount,
                         Hour = hour,
                         IsMerchant = dst.AccountNumber.StartsWith('M') ? 1 : 0,
@@ -79,13 +81,13 @@ namespace FraudRiskMgmt.API.Services
             try
             {
                 var customer = await _db.Customers
-                    .FirstOrDefaultAsync(c => c.AccountNumber == src.AccountNumber && c.DeletedAt == null);
+                    .FirstOrDefaultAsync(c => c.AccountNumber == origAcc && c.DeletedAt == null);
                 if (customer == null)
                 {
                     customer = new Customer
                     {
-                        AccountNumber = src.AccountNumber,
-                        FullName = string.IsNullOrWhiteSpace(src.HolderName) ? $"Khách hàng {src.AccountNumber}" : src.HolderName.Trim(),
+                        AccountNumber = origAcc,
+                        FullName = string.IsNullOrWhiteSpace(src.HolderName) ? $"Khách hàng {origAcc}" : src.HolderName.Trim(),
                         CreatedAt = DateTime.UtcNow
                     };
                     _db.Customers.Add(customer);
@@ -97,8 +99,8 @@ namespace FraudRiskMgmt.API.Services
                     ExternalRef = req.ExternalRef,
                     CustomerId = customer.CustomerId,
                     TransactionType = req.Type,
-                    NameOrig = src.AccountNumber,
-                    NameDest = dst.AccountNumber,
+                    NameOrig = origAcc,
+                    NameDest = destAcc,
                     Amount = req.Amount,
                     OldBalanceOrg = src.BalanceBefore,
                     NewBalanceOrig = src.BalanceAfter,

@@ -6,6 +6,7 @@
         public string Status { get; set; } = string.Empty;
         public int CustomerId { get; set; }
         public string CustomerName { get; set; } = string.Empty;
+        public int DistinctCustomerCount { get; set; } = 1;
         public int OpenedBy { get; set; }
         public string OpenByName { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; }
@@ -13,17 +14,21 @@
         public List<CaseDetailAlert> Alerts { get; set; } = new();
         public List<CaseDetailNote> Notes { get; set; } = new();
         public List<CaseDetailProposal> Proposals { get; set; } = new();
+        public string MergePattern { get; set; } = "SameCustomer";
+        public string? CorrelationKey { get; set; }
     }
 
     public class CaseDetailAlert
     {
         public int AlertId { get; set; }
         public string Status { get; set; } = string.Empty;
-
-        // Nếu entity Alert của bạn có điểm rủi ro, thêm vào đây (và vào phép chiếu trong GetCaseById)
-        // để trang chi tiết hiện thêm điểm + mức độ rủi ro của từng cảnh báo:
-        public double RiskScore { get; set; }      // đổi kiểu cho khớp entity (0..1 như API danh sách alert)
+        public double RiskScore { get; set; }
         public string RiskLevel { get; set; } = string.Empty;
+        public string? CustomerName { get; set; }
+        public double Amount { get; set; }
+        public string? NameOrig { get; set; }
+        public string? NameDest { get; set; }
+        public DateTime TransactionTime { get; set; }
     }
 
     public class CaseDetailNote

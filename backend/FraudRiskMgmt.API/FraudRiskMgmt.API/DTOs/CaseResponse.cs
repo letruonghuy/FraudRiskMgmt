@@ -4,10 +4,13 @@
     {
         public int CaseId { get; set; }
         public string CustomerName { get; set; } = string.Empty;
+        public int DistinctCustomerCount { get; set; } = 1;
         public List<int> AlertIds { get; set; } = new();
         public string Status { get; set; } = string.Empty;
         public string OpenByName { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; }
         public DateTime? ClosedAt { get; set; }
+        public string MergePattern { get; set; } = "SameCustomer";
+        public string? CorrelationKey { get; set; }
     }
 }

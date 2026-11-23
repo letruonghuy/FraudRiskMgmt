@@ -1,5 +1,7 @@
-﻿using Microsoft.Extensions.Options;
+﻿using FraudRiskMgmt.API.Data;
 using FraudRiskMgmt.API.Models;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace FraudRiskMgmt.API.Services
 {
@@ -12,21 +14,57 @@ namespace FraudRiskMgmt.API.Services
 
     public class RiskPolicy
     {
-        private readonly RiskPolicyOptions _o;
-        public RiskPolicy(IOptions<RiskPolicyOptions> options) => _o = options.Value;
+        private readonly AppDbContext _db;
+        private readonly RiskPolicyOptions _fallback;
 
-        public bool ShouldAlert(double score) => score >= _o.AlertThreshold;
+        public RiskPolicy(AppDbContext db, IOptions<RiskPolicyOptions> options)
+        {
+            _db = db;
+            _fallback = options.Value;
+        }
+
+        public RiskPolicyOptions GetCurrentOptions()
+        {
+            var cfg = _db.RiskPolicyConfigs
+                .AsNoTracking()
+                .OrderBy(c => c.RiskPolicyConfigId)
+                .FirstOrDefault();
+
+            if (cfg == null) return _fallback;
+
+            return new RiskPolicyOptions
+            {
+                AlertThreshold = cfg.AlertThreshold,
+                HighConfidenceScore = cfg.HighConfidenceScore,
+                LargeAmount = cfg.LargeAmount
+            };
+        }
+
+        public bool ShouldAlert(double score)
+        {
+            var o = GetCurrentOptions();
+            return score >= o.AlertThreshold;
+        }
 
         public string Classify(double score, double amount)
         {
-            if (score < _o.AlertThreshold) return RiskLevels.Safe;
-            var large = amount >= _o.LargeAmount;
-            return score >= _o.HighConfidenceScore
-                ? (large ? RiskLevels.Critical : RiskLevels.High)
-                : (large ? RiskLevels.Medium : RiskLevels.Low);
+            var o = GetCurrentOptions();
+            return ClassifyWithOptions(score, amount, o);
         }
 
         public string ClassifyManualReview(double amount)
-            => amount >= _o.LargeAmount ? RiskLevels.High : RiskLevels.Medium;
+        {
+            var o = GetCurrentOptions();
+            return amount >= o.LargeAmount ? RiskLevels.High : RiskLevels.Medium;
+        }
+
+        public static string ClassifyWithOptions(double score, double amount, RiskPolicyOptions o)
+        {
+            if (score < o.AlertThreshold) return RiskLevels.Safe;
+            var large = amount >= o.LargeAmount;
+            return score >= o.HighConfidenceScore
+                ? (large ? RiskLevels.Critical : RiskLevels.High)
+                : (large ? RiskLevels.Medium : RiskLevels.Low);
+        }
     }
 }

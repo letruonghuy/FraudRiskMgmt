@@ -49,6 +49,11 @@ namespace FraudRiskMgmt.API.Migrations
                     b.Property<double>("RiskScore")
                         .HasColumnType("float");
 
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
@@ -81,6 +86,9 @@ namespace FraudRiskMgmt.API.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
+
+                    b.Property<string>("Details")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("EntityId")
                         .HasColumnType("int");
@@ -168,6 +176,9 @@ namespace FraudRiskMgmt.API.Migrations
                     b.Property<DateTime?>("ClosedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("CorrelationKey")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -177,12 +188,24 @@ namespace FraudRiskMgmt.API.Migrations
                     b.Property<DateTime?>("DeletedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("MergePattern")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<int>("OpenedBy")
                         .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
 
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
 
                     b.HasKey("CaseId");
 
@@ -248,6 +271,40 @@ namespace FraudRiskMgmt.API.Migrations
                     b.HasIndex("CaseId");
 
                     b.ToTable("InvestigationNotes");
+                });
+
+            modelBuilder.Entity("FraudRiskMgmt.API.Models.RiskPolicyConfig", b =>
+                {
+                    b.Property<int>("RiskPolicyConfigId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("RiskPolicyConfigId"));
+
+                    b.Property<double>("AlertThreshold")
+                        .HasColumnType("float");
+
+                    b.Property<double>("HighConfidenceScore")
+                        .HasColumnType("float");
+
+                    b.Property<double>("LargeAmount")
+                        .HasColumnType("float");
+
+                    b.Property<string>("LastChangeReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("int");
+
+                    b.HasKey("RiskPolicyConfigId");
+
+                    b.HasIndex("UpdatedByUserId");
+
+                    b.ToTable("RiskPolicyConfigs");
                 });
 
             modelBuilder.Entity("FraudRiskMgmt.API.Models.Transactions", b =>
@@ -340,6 +397,12 @@ namespace FraudRiskMgmt.API.Migrations
                     b.Property<string>("FullName")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime?>("LastLoginAt")
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("PasswordHash")
                         .IsRequired()
@@ -454,6 +517,15 @@ namespace FraudRiskMgmt.API.Migrations
                     b.Navigation("Author");
 
                     b.Navigation("Case");
+                });
+
+            modelBuilder.Entity("FraudRiskMgmt.API.Models.RiskPolicyConfig", b =>
+                {
+                    b.HasOne("FraudRiskMgmt.API.Models.User", "UpdatedByUser")
+                        .WithMany()
+                        .HasForeignKey("UpdatedByUserId");
+
+                    b.Navigation("UpdatedByUser");
                 });
 
             modelBuilder.Entity("FraudRiskMgmt.API.Models.Transactions", b =>

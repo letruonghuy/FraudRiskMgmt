@@ -36,5 +36,6 @@ namespace FraudRiskMgmt.API.DTOs
         public double NewBalanceOrig { get; set; }
         public double OldBalanceDest { get; set; }
         public double NewBalanceDest { get; set; }
+        public DateTime? TransactionTime { get; set; }
     }
 }

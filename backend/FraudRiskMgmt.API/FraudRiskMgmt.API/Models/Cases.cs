@@ -8,17 +8,23 @@ namespace FraudRiskMgmt.API.Models
         [Key]
         public int CaseId { get; set; }
         public int CustomerId { get; set; }
-        public Customer Customer { get; set; } = null!;  
-        public string Status {  get; set; } = CaseStatuses.Open;
-        public int OpenedBy {  get; set; }
+        public Customer Customer { get; set; } = null!;
+        public string Status { get; set; } = CaseStatuses.Open;
+        public int OpenedBy { get; set; }
         [ForeignKey("OpenedBy")]
-        public User OpenedByUser { get; set; } = null!; 
+        public User OpenedByUser { get; set; } = null!;
         public DateTime CreatedAt { get; set; }
+        public DateTime? UpdatedAt { get; set; }
         public DateTime? ClosedAt { get; set; }
-        public DateTime? DeletedAt {  get; set; }
+        public DateTime? DeletedAt { get; set; }
         public ICollection<Alert> Alerts { get; set; } = new List<Alert>();
         public ICollection<InvestigationNote> InvestigationNotes { get; set; } = new List<InvestigationNote>();
         public ICollection<CaseActionProposal> ActionProposals { get; set; } = new List<CaseActionProposal>();
 
+        public string MergePattern { get; set; } = "SameCustomer"; // SameCustomer | SameDestination | MoneyTrail
+        public string? CorrelationKey { get; set; }
+
+        [Timestamp]
+        public byte[]? RowVersion { get; set; }
     }
 }

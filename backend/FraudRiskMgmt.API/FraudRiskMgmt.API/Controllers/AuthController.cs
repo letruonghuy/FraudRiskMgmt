@@ -35,7 +35,7 @@ namespace FraudRiskMgmt.API.Controllers
         {
             try
             {
-                var normalizedEmail = request.Email.Trim().ToLowerInvariant();
+                var normalizedEmail = (request.Email ?? string.Empty).Trim().ToLowerInvariant();
                 var user = await _appDbContext.Users
                     .FirstOrDefaultAsync(u => u.Email.ToLower() == normalizedEmail);
 
@@ -52,6 +52,17 @@ namespace FraudRiskMgmt.API.Controllers
                     return Unauthorized(ApiResponse<object>.Fail("Email hoặc mật khẩu không đúng"));
                 }
 
+                // Chỉ báo "đã bị khóa" khi người dùng đã nhập ĐÚNG mật khẩu,
+                // để người lạ không dò được trạng thái tài khoản.
+                if (!user.IsActive || user.DeletedAt != null)
+                {
+                    _logger.LogWarning("Login bị từ chối - Tài khoản đã bị khóa: {Email}", normalizedEmail);
+                    return Unauthorized(ApiResponse<object>.Fail("Tài khoản đã bị khóa. Vui lòng liên hệ quản trị viên."));
+                }
+
+                user.LastLoginAt = DateTime.UtcNow;
+                await _appDbContext.SaveChangesAsync();
+
                 _logger.LogInformation("Login thành công: {Email}, Role: {Role}", normalizedEmail, user.Role);
                 return Ok(ApiResponse<LoginResponse>.Ok(new LoginResponse
                 {
@@ -64,7 +75,7 @@ namespace FraudRiskMgmt.API.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Lỗi hệ thống khi login: {Email}", request.Email);
+                _logger.LogError(ex, "Lỗi hệ thống khi đăng nhập: {Email}", request.Email);
                 return StatusCode(500, ApiResponse<object>.Fail("Đã xảy ra lỗi trong quá trình đăng nhập"));
             }
         }

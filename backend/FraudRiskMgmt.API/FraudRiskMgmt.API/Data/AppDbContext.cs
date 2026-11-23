@@ -3,12 +3,11 @@ using Microsoft.EntityFrameworkCore;
 
 namespace FraudRiskMgmt.API.Data
 {
-    public class AppDbContext: DbContext
+    public class AppDbContext : DbContext
     {
         public AppDbContext(DbContextOptions<AppDbContext> options) : base(options)
         {
         }
-
 
         public DbSet<Customer> Customers { get; set; }
         public DbSet<Transactions> Transactions { get; set; }
@@ -18,6 +17,7 @@ namespace FraudRiskMgmt.API.Data
         public DbSet<InvestigationNote> InvestigationNotes { get; set; }
         public DbSet<CaseActionProposal> CaseActionProposals { get; set; }
         public DbSet<AuditLog> AuditLogs { get; set; }
+        public DbSet<RiskPolicyConfig> RiskPolicyConfigs { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -26,10 +26,18 @@ namespace FraudRiskMgmt.API.Data
             modelBuilder.Entity<User>()
                 .HasIndex(u => u.Email)
                 .IsUnique();
-                
+
             modelBuilder.Entity<User>()
                 .Property(user => user.Role)
                 .HasConversion<string>();
+
+            modelBuilder.Entity<Alert>()
+                .Property(alert => alert.RowVersion)
+                .IsRowVersion();
+
+            modelBuilder.Entity<Cases>()
+                .Property(c => c.RowVersion)
+                .IsRowVersion();
 
             modelBuilder.Entity<Alert>()
                 .HasOne(alert => alert.Case)

@@ -57,7 +57,7 @@ namespace FraudRiskMgmt.API.Controllers
                     NameOrig = request.NameOrig,
                     NameDest = request.NameDest,
                     RiskLevel = _policy.Classify(result.RiskScore, request.Amount),
-                    TransactionTime = DateTime.UtcNow,
+                    TransactionTime = request.TransactionTime ?? DateTime.UtcNow,
                     Hour = request.Hour,
                 };
 

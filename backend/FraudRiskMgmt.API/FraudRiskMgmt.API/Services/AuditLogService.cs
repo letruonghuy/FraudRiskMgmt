@@ -10,6 +10,7 @@ namespace FraudRiskMgmt.API.Services
         {
             _appDbContext = context;
         }
+
         public async Task LogAsync(
             int userId,
             string action,
@@ -17,7 +18,8 @@ namespace FraudRiskMgmt.API.Services
             int entityId,
             string? oldStatus = null,
             string? newStatus = null,
-            string? reason = null)
+            string? reason = null,
+            string? details = null)
         {
             var log = new AuditLog
             {
@@ -28,6 +30,7 @@ namespace FraudRiskMgmt.API.Services
                 OldStatus = oldStatus,
                 NewStatus = newStatus,
                 Reason = reason,
+                Details = details,
                 CreatedAt = DateTime.UtcNow
             };
 
