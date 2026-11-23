@@ -51,3 +51,6 @@ fraud-detection-ml/data/*.csv
 !fraud-detection-ml/data/simulator_source.csv
 .impeccable/
 
+.agents/
+.github/skills/
+
